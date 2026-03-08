@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SpotifyOAuthConfig>
+  <ClientId>1a979df868544bcd8c69fd27492c0cb0</ClientId>
+  <ClientSecret>78731cc4af5c42e7a2609f1419655490</ClientSecret>
+  <RedirectUri>http://127.0.0.1:8888/callback</RedirectUri>
+  <Scopes>
+    playlist-read-private
+    playlist-read-collaborative
+    user-follow-read
+    user-follow-modify
+    user-library-read
+    user-library-modify
+    user-modify-playback-state
+    user-read-currently-playing
+    user-read-playback-state
+    user-read-playback-position
+    user-read-private
+    user-read-email
+    user-read-recently-played
+    user-top-read
+    playlist-modify-private
+    playlist-modify-public
+  </Scopes>
+  <TokenManagerPath>app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt</TokenManagerPath>
+</SpotifyOAuthConfig>

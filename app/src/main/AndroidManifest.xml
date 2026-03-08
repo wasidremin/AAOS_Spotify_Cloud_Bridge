@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Internet is required for all Spotify Web API calls -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        Bluetooth permissions for the auto-launch receiver.
+        BLUETOOTH is needed on API 30 and below.
+        BLUETOOTH_CONNECT is required on API 31+ to read device addresses.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_CONNECT"
+        android:minSdkVersion="31" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
+    <!--
+        Declares this app as compatible with AAOS, but allows installation
+        on standard phones/tablets as well. The app will detect the platform
+        and adapt its behavior accordingly.
+    -->
+    <uses-feature
+        android:name="android.hardware.type.automotive"
+        android:required="false" />
+
+    <application
+        android:name=".SpotifyCloudBridgeApp"
+        android:allowBackup="false"
+        android:appCategory="audio"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.CloudBridge">
+
+        <!--
+            MainActivity: The primary entry point for the Compose UI.
+            Shows up in the AAOS app launcher via MAIN/LAUNCHER.
+            The distractionOptimized flag tells the car's OS to allow
+            this Activity to stay fully interactive while the vehicle
+            is in motion — bypassing the default UXR restricitons.
+        -->
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.CloudBridge"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- The magic bypass — AAOS allows full interactivity while driving -->
+            <meta-data
+                android:name="distractionOptimized"
+                android:value="true" />
+        </activity>
+
+        <!--
+            SetupActivity: Legacy credential entry screen (XML-based).
+            Still useful as a fallback / direct adb shortcut.
+            No distractionOptimized — only usable while parked.
+        -->
+        <activity
+            android:name=".auth.SetupActivity"
+            android:exported="true"
+            android:label="@string/setup_activity_title"
+            android:theme="@style/Theme.CloudBridge">
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            BluetoothAutoLaunchReceiver: Brings MainActivity to the foreground
+            whenever the user's paired Bluetooth device (e.g., their phone)
+            connects — giving an "auto-open music app on car entry" experience.
+            The paired MAC address is saved in TokenManager via Settings.
+        -->
+        <receiver
+            android:name=".receiver.BluetoothAutoLaunchReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+            </intent-filter>
+        </receiver>
+
+    </application>
+
+</manifest>

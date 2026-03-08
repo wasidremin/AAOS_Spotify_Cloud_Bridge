@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Spotify Cloud Bridge</string>
+    <string name="setup_activity_title">Cloud Bridge Settings</string>
+
+    <!-- Setup Activity -->
+    <string name="setup_title">Spotify Cloud Bridge Setup</string>
+    <string name="setup_instructions">Enter your Spotify API credentials below.\n\nYou need a Client ID from developer.spotify.com and a Refresh Token obtained via the Authorization Code flow.</string>
+    <string name="hint_client_id">Spotify Client ID</string>
+    <string name="hint_refresh_token">Spotify Refresh Token</string>
+    <string name="btn_save">Save Credentials</string>
+    <string name="btn_clear">Clear Credentials</string>
+    <string name="toast_saved">Credentials saved successfully</string>
+    <string name="toast_cleared">Credentials cleared</string>
+    <string name="toast_error_empty">Please fill in both fields</string>
+
+    <!-- Media Service -->
+    <string name="browse_root_title">Spotify Cloud Bridge</string>
+    <string name="browse_playlists_title">My Playlists</string>
+
+    <!-- Errors -->
+    <string name="error_auth_required">Sign in required</string>
+    <string name="error_auth_action_label">Set Up Credentials</string>
+    <string name="error_no_device">No Spotify device found. Open Spotify on your phone.</string>
+    <string name="error_network">Network error. Check your connection.</string>
+    <string name="error_playback_failed">Playback failed. Make sure Spotify is open on your phone.</string>
+    <string name="error_rate_limited">Too many requests. Please wait a moment.</string>
+</resources>

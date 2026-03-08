@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Declares this app as an automotive media source.
+    AAOS reads this file to determine app capabilities.
+    Without this, the app will NOT appear in the car's media launcher.
+-->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>

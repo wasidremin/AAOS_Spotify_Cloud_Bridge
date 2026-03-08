@@ -1,0 +1,46 @@
+# Built outputs
+/build/
+/app/build/
+*.apk
+*.aab
+*.ap_
+
+# Gradle
+/.gradle/
+/gradle/wrapper/gradle-wrapper.jar
+local.properties
+
+# IDE
+/.idea/
+/.vscode/
+*.iml
+*.iws
+*.ipr
+.DS_Store
+Thumbs.db
+
+# Kotlin
+*.class
+*.kotlin_module
+/.kotlin/
+
+# Local artifacts / logs
+*.log
+assemble_results.log
+install_result.txt
+logcat.txt
+test_exit.txt
+test_results.log
+tmp_auth_check.txt
+
+# Screenshots and local captures
+/screenshots/
+
+# Local backups
+*.bak
+
+# Secrets — never commit tokens
+secrets.properties
+Spotify_Keys.txt
+*.keystore
+*.jks
