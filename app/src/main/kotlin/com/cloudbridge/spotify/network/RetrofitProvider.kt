@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit
 class RetrofitProvider(private val tokenManager: TokenManager) {
 
     companion object {
-        private const val CLOUD_RELAY_BASE_URL = "https://placeholder-firebase-db.firebaseio.com/"
+        private const val CLOUD_RELAY_BASE_URL = "https://aaosspotiftycloudbridge-default-rtdb.firebaseio.com/"
     }
 
     private val moshi: Moshi = Moshi.Builder()

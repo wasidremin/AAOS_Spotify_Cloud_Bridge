@@ -43,6 +43,11 @@ class TokenManager(
 
     companion object {
         private val KEY_ACTIVE_PROFILE_ID = stringPreferencesKey("active_profile_id")
+        private val KEY_LEGACY_CLIENT_ID = stringPreferencesKey("client_id")
+        private val KEY_LEGACY_CLIENT_SECRET = stringPreferencesKey("client_secret")
+        private val KEY_LEGACY_REFRESH_TOKEN = stringPreferencesKey("refresh_token")
+        private val KEY_LEGACY_ACCESS_TOKEN = stringPreferencesKey("access_token")
+        private val KEY_LEGACY_TOKEN_EXPIRY = longPreferencesKey("token_expiry_epoch_ms")
         private val KEY_RATE_LIMIT_UNTIL = longPreferencesKey("rate_limit_until_epoch_ms")
         private val KEY_RATE_LIMIT_RETRY_AFTER_SECONDS = longPreferencesKey("rate_limit_retry_after_seconds")
         private val KEY_LOCKED_DEVICE_ID = stringPreferencesKey("locked_device_id")
@@ -53,6 +58,7 @@ class TokenManager(
         private val KEY_PLAY_INSTANTLY = androidx.datastore.preferences.core.booleanPreferencesKey("play_instantly")
         private val KEY_EXPLICIT_FILTER_ENABLED = androidx.datastore.preferences.core.booleanPreferencesKey("explicit_filter_enabled")
         private val KEY_DAILY_DRIVE_NEWS_ID = stringPreferencesKey("daily_drive_news_id")
+        private val KEY_HOME_SECTION_ORDER = stringPreferencesKey("home_section_order")
         private const val DEFAULT_DAILY_DRIVE_NEWS_ID = "1L1qK1Gvj5B0AItWlF1n9G"
     }
 
@@ -90,6 +96,12 @@ class TokenManager(
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: DEFAULT_DAILY_DRIVE_NEWS_ID
+    }
+    val homeSectionOrderFlow: Flow<List<String>> = dataStore.data.map { prefs ->
+        prefs[KEY_HOME_SECTION_ORDER]
+            ?.split(',')
+            ?.mapNotNull { entry -> entry.trim().takeIf { it.isNotBlank() } }
+            ?: emptyList()
     }
 
     val hasCredentials: Flow<Boolean> = activeProfileFlow.map { profile ->
@@ -207,6 +219,39 @@ class TokenManager(
         userProfileDao.clearAll()
     }
 
+    suspend fun migrateLegacyCredentialsIfNeeded(): Boolean {
+        if (userProfileDao.getAllOnce().isNotEmpty()) return false
+
+        val prefs = dataStore.data.first()
+        val clientId = prefs[KEY_LEGACY_CLIENT_ID]?.trim().orEmpty()
+        val refreshToken = prefs[KEY_LEGACY_REFRESH_TOKEN]?.trim().orEmpty()
+        if (clientId.isBlank() || refreshToken.isBlank()) return false
+
+        val migratedProfile = UserProfile(
+            id = UUID.randomUUID().toString(),
+            name = "Primary Profile",
+            clientId = clientId,
+            clientSecret = prefs[KEY_LEGACY_CLIENT_SECRET]?.trim()?.takeIf { it.isNotBlank() },
+            refreshToken = refreshToken,
+            accessToken = prefs[KEY_LEGACY_ACCESS_TOKEN]?.trim()?.takeIf { it.isNotBlank() },
+            tokenExpiryEpochMs = prefs[KEY_LEGACY_TOKEN_EXPIRY] ?: 0L,
+            profileImageUrl = null
+        )
+
+        userProfileDao.insert(migratedProfile)
+        setActiveProfileId(migratedProfile.id)
+
+        dataStore.edit { editablePrefs ->
+            editablePrefs.remove(KEY_LEGACY_CLIENT_ID)
+            editablePrefs.remove(KEY_LEGACY_CLIENT_SECRET)
+            editablePrefs.remove(KEY_LEGACY_REFRESH_TOKEN)
+            editablePrefs.remove(KEY_LEGACY_ACCESS_TOKEN)
+            editablePrefs.remove(KEY_LEGACY_TOKEN_EXPIRY)
+        }
+
+        return true
+    }
+
     /**
      * Lock playback to a specific Spotify Connect device.
      * When locked, DeviceManager will always use this device ID
@@ -268,6 +313,17 @@ class TokenManager(
     suspend fun saveDailyDriveNewsId(id: String) {
         dataStore.edit { prefs ->
             prefs[KEY_DAILY_DRIVE_NEWS_ID] = id.trim().ifBlank { DEFAULT_DAILY_DRIVE_NEWS_ID }
+        }
+    }
+
+    suspend fun saveHomeSectionOrder(order: List<String>) {
+        dataStore.edit { prefs ->
+            val normalized = order.mapNotNull { it.trim().takeIf { key -> key.isNotBlank() } }
+            if (normalized.isEmpty()) {
+                prefs.remove(KEY_HOME_SECTION_ORDER)
+            } else {
+                prefs[KEY_HOME_SECTION_ORDER] = normalized.joinToString(separator = ",")
+            }
         }
     }
 

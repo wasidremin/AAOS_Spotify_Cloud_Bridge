@@ -1,4 +1,150 @@
 ═══════════════════════════════════════════════════════════════
+ R5.6  —  2026-03-09
+═══════════════════════════════════════════════════════════════
+ Summary: Release v2.8.0 — Custom Mix art grids, marketing page, playback fix
+
+ Changes:
+   • Bumped versionCode to 14 and versionName to "2.8.0" for Play Store release
+   • Generated signed AAB bundle for production deployment
+
+ Files Modified:
+   • app/build.gradle.kts
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.5  —  2026-03-09
+═══════════════════════════════════════════════════════════════
+ Summary: Custom Mix 4-art grid tiles, marketing landing page, playback polling fix
+
+ Changes:
+   • Fixed playback polling regression — changed additional_types from "track,episode,chapter" to "episode" (HTTP 400 → 200)
+   • Added FourImageGrid composable rendering 2×2 album art grids on Custom Mix home tiles
+   • Added loadCustomMixArt() to SpotifyViewModel — fetches unique album covers per decade mix and podcast art for Daily Drive
+   • Updated HomeScreen addCustomMixesSection to display art grids with icon fallback
+   • Created docs/marketing.html — a polished Spotify-themed landing page for GitHub Pages with screenshots, feature showcase, architecture diagram, and tech stack
+   • Captured 7 marketing screenshots from the AAOS emulator (home, now playing, library, search, queue, settings, custom mixes)
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/components/FourImageGrid.kt (new)
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/HomeScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/SpotifyApiService.kt
+   • docs/marketing.html (new)
+   • docs/images/marketing_home.png (new)
+   • docs/images/marketing_nowplaying.png (new)
+   • docs/images/marketing_library.png (new)
+   • docs/images/marketing_search.png (new)
+   • docs/images/marketing_queue.png (new)
+   • docs/images/marketing_settings.png (new)
+   • docs/images/marketing_home_mixes.png (new)
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.4  —  2026-03-09
+═══════════════════════════════════════════════════════════════
+ Summary: Restored playback refreshes and added configurable home section ordering
+
+ Changes:
+   • Reworked profile bootstrap and playback refresh logic so Now Playing, the mini player, and Resume Playback trigger fresh state syncs more reliably
+   • Added a Home screen order editor under Settings and persisted the section order in DataStore
+   • Adjusted Daily Drive sequencing to return to podcast content sooner instead of front-loading too many songs
+   • Added regression coverage for the new home-section preference and Daily Drive ordering
+
+ Files Modified:
+   • .github/agents/AAOS_Spotify_Cloud_Bridge.md.agent.md
+   • .github/instructions/AAOS_SpotifyCloudBridge.instructions.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/domain/CustomMixEngine.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/HomeSection.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/HomeLayoutSettingsScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/HomeScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SettingsScreen.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/auth/TokenManagerTest.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/domain/CustomMixEngineTest.kt
+   • README.md
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.3  —  2026-03-08
+═══════════════════════════════════════════════════════════════
+ Summary: Release build with Play Store version uprev to 2.7.3
+
+ Changes:
+   • Incremented versionCode from 12 to 13 and versionName from "2.7.2" to "2.7.3" for Play Store submission
+   • Generated signed AAB bundle for production deployment
+
+ Files Modified:
+   • app/build.gradle.kts
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.2  —  2026-03-08
+═══════════════════════════════════════════════════════════════
+ Summary: Wired the real Firebase relay endpoint and added GitHub sync guidance
+
+ Changes:
+   • Replaced the Add Profile cloud-relay placeholder base URL with the live Firebase Realtime Database endpoint used by the web companion
+   • Documented the exact relay backend in the README and added a repository sync workflow to the setup guide
+   • Updated both the project instruction file and the agent file with required GitHub update-check, rebase, and upload steps
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/RetrofitProvider.kt
+   • README.md
+   • docs/SETUP_GUIDE.md
+   • .github/instructions/AAOS_SpotifyCloudBridge.instructions.md
+   • .github/agents/AAOS_Spotify_Cloud_Bridge.md.agent.md
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.1  —  2026-03-08
+═══════════════════════════════════════════════════════════════
+ Summary: Fixed QR onboarding URL and enforced first-profile setup flow
+
+ Changes:
+   • Updated the Add Profile QR link and GitHub Pages redirect to use the correct `https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/` companion URL with the `session` query parameter
+   • Added startup migration from legacy DataStore credentials into the Room-backed `user_profiles` store so older saved keys survive upgrades
+   • Forced zero-profile launches to stay on the QR onboarding screen until the first Spotify profile is added
+   • Added a `TokenManager` regression test for legacy credential migration and documented the new onboarding behavior
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/SpotifyCloudBridgeApp.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/AddProfileViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/auth/TokenManagerTest.kt
+   • README.md
+   • docs/SETUP_GUIDE.md
+   • docs/index.html
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.0  —  2026-03-08
 ═══════════════════════════════════════════════════════════════
  Summary: Added Phase 1 multi-profile support with QR-based cloud onboarding

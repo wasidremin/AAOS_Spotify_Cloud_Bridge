@@ -127,6 +127,18 @@ Until library cache rows and pinned items are fully profile-scoped, switching th
 - Append to `revisions.txt` with the new revision entry (see Section 7).
 - If you are producing a release artifact (`bundleRelease` / `assembleRelease`), also bump `versionCode` and `versionName` in `app/build.gradle.kts` before building so the AAB/APK is installable and uniquely versioned.
 
+### Step 6: GitHub Sync
+- Before starting a change, check the remote repository for updates:
+  - `git fetch origin`
+  - `git status -sb`
+  - `git log --oneline HEAD..origin/main`
+- If `origin/main` is ahead, rebase before continuing: `git pull --rebase origin main`
+- After docs, build, tests, emulator verification, and revision updates are complete, upload the finished work:
+  - `git add -A`
+  - `git commit -m "<summary>"`
+  - `git push origin main`
+- Never push secrets, generated token dumps, screenshots meant to stay local, or other sensitive files without verifying `.gitignore` first.
+
 ## 6. Revision Numbering
 
 The project uses semantic revision numbers in the format `R<major>.<minor>`:
@@ -240,6 +252,13 @@ The Kotlin compiler then reads the stale cache and reports errors against **old*
 - Prefer native PowerShell invocation for Gradle.
 - Persist logs with `Tee-Object` so output is visible live and saved to disk.
 
+### GitHub Repository Hygiene
+- Always run `git fetch origin` before assuming the local branch is current.
+- Use `git status -sb` before and after edits to confirm what will be committed.
+- Review incoming remote commits with `git log --oneline HEAD..origin/main` and outgoing local commits with `git log --oneline origin/main..HEAD`.
+- Prefer `git pull --rebase origin main` over merge pulls to keep the branch history linear unless the user explicitly wants a merge commit.
+- Only `git push origin main` after the documented build, test, and emulator steps pass.
+
 ## 9. Known Gotchas & Hard-Won Lessons
 
 ### Kotlin Flow — `first()` Requires an Explicit Import
@@ -286,6 +305,7 @@ Missing this import causes an "Unresolved reference 'first'" error at every call
 - Gradle Kotlin DSL with version catalog at `gradle/libs.versions.toml`.
 - Use PowerShell-native Gradle invocation with `Tee-Object` for reliable live output plus a saved log.
 - Clean before build if seeing stale errors: `.\gradlew.bat clean assembleDebug`
+- In the VS Code PowerShell terminal, set `JAVA_HOME` to the Microsoft/OpenJDK 17 install before running Gradle if the shell defaults to Java 8, or AGP 8.7.x will fail during dependency resolution.
 
 ## 10. Spotify Scopes Required
 

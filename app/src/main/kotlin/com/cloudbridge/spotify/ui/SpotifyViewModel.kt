@@ -23,7 +23,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Semaphore
@@ -150,6 +153,10 @@ class SpotifyViewModel(
     private val context: android.content.Context
 ) : ViewModel() {
 
+    private val hasProfilesOnDisk = runBlocking(Dispatchers.IO) {
+        cacheDb.userProfileDao().getAllOnce().isNotEmpty()
+    }
+
     companion object {
         private const val TAG = "SpotifyViewModel"
         private const val METADATA_POLL_MS = 3000L
@@ -200,10 +207,11 @@ class SpotifyViewModel(
         data class PodcastDetail(val id: String, val name: String, val uri: String) : Screen()
         data object Queue : Screen()
         data object Settings : Screen()
+        data object HomeLayoutSettings : Screen()
         data object AddProfile : Screen()
     }
 
-    private val _currentScreen = MutableStateFlow<Screen>(Screen.Home)
+    private val _currentScreen = MutableStateFlow<Screen>(if (hasProfilesOnDisk) Screen.Home else Screen.AddProfile)
     val currentScreen: StateFlow<Screen> = _currentScreen
 
     private val backStack = mutableListOf<Screen>()
@@ -229,6 +237,10 @@ class SpotifyViewModel(
         CustomMix(CUSTOM_MIX_2000S, "2000s Mix", "2000s favorites with smart recommendations", 0xFF0891B2),
         CustomMix(CUSTOM_MIX_2010S, "2010s Mix", "2010s favorites with smart recommendations", 0xFF16A34A)
     )
+
+    /** Mix-ID → up to 4 cover-art URLs for the 2×2 grid tiles on the home screen. */
+    private val _customMixArt = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val customMixArt: StateFlow<Map<String, List<String>>> = _customMixArt.asStateFlow()
 
     private val _topTracks = MutableStateFlow<List<SpotifyTrack>>(emptyList())
     val topTracks: StateFlow<List<SpotifyTrack>> = _topTracks
@@ -329,10 +341,14 @@ class SpotifyViewModel(
     val playInstantly: StateFlow<Boolean> = _playInstantly.asStateFlow()
 
     val userProfiles: StateFlow<List<UserProfile>> = tokenManager.userProfilesFlow
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val activeProfileId: StateFlow<String?> = tokenManager.activeProfileIdFlow
-        .stateIn(viewModelScope, SharingStarted.Lazily, null)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val homeSectionOrder: StateFlow<List<HomeSection>> = tokenManager.homeSectionOrderFlow
+        .map(HomeSection::fromStorageKeys)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, HomeSection.defaultOrder)
 
     private val _explicitFilterEnabled = MutableStateFlow(false)
     val explicitFilterEnabled: StateFlow<Boolean> = _explicitFilterEnabled.asStateFlow()
@@ -371,13 +387,39 @@ class SpotifyViewModel(
     private var metadataSyncJob: Job? = null
     private var searchJob: Job? = null
     private var podcastUpdatesJob: Job? = null
+    private var lastObservedProfileId: String? = null
 
     // ── Lifecycle ────────────────────────────────────────────────────
 
     init {
-        loadLockedDeviceSetting()
-        loadHomeFeed()
-        startMetadataSync()
+        viewModelScope.launch {
+            combine(userProfiles, activeProfileId) { profiles, activeId -> profiles to activeId }
+                .collectLatest { (profiles, activeId) ->
+                    if (profiles.isEmpty()) {
+                        if (hasProfilesOnDisk && lastObservedProfileId == null) {
+                            return@collectLatest
+                        }
+                        lastObservedProfileId = null
+                        enterProfileSetupMode()
+                        return@collectLatest
+                    }
+
+                    val resolvedProfileId = activeId ?: profiles.firstOrNull()?.id
+                    if (resolvedProfileId.isNullOrBlank()) {
+                        lastObservedProfileId = null
+                        enterProfileSetupMode()
+                        return@collectLatest
+                    }
+
+                    val previousProfileId = lastObservedProfileId
+                    val shouldClearProfileData = previousProfileId != null && previousProfileId != resolvedProfileId
+                    if (previousProfileId == resolvedProfileId && metadataSyncJob?.isActive == true) {
+                        return@collectLatest
+                    }
+                    lastObservedProfileId = resolvedProfileId
+                    refreshForActiveProfile(shouldClearProfileData)
+                }
+        }
 
         viewModelScope.launch {
             tokenManager.gridColumnsFlow.collect { _gridColumns.value = it }
@@ -404,6 +446,36 @@ class SpotifyViewModel(
         metadataSyncJob?.cancel()
     }
 
+    private suspend fun enterProfileSetupMode() {
+        metadataSyncJob?.cancel()
+        metadataSyncJob = null
+        homeFeedJob?.cancel()
+        libraryJob?.cancel()
+        searchJob?.cancel()
+        podcastUpdatesJob?.cancel()
+        backStack.clear()
+        _showNowPlaying.value = false
+        _playbackState.value = null
+        _isTrackSaved.value = false
+        _currentScreen.value = Screen.AddProfile
+    }
+
+    private suspend fun refreshForActiveProfile(clearProfileData: Boolean) {
+        if (clearProfileData) {
+            clearProfileScopedData()
+        }
+
+        loadLockedDeviceSetting()
+        loadHomeFeed()
+        loadLibrary()
+        loadDevices()
+        startMetadataSync(forceRestart = clearProfileData, immediateSync = true)
+    }
+
+    fun refreshPlaybackStateNow() {
+        startMetadataSync(immediateSync = true)
+    }
+
     private fun prefetchImages(urls: List<String?>) {
         viewModelScope.launch(Dispatchers.IO) {
             urls.filterNotNull().distinct().forEach { url ->
@@ -427,6 +499,11 @@ class SpotifyViewModel(
      * @param screen The target [Screen] to display.
      */
     fun navigateTo(screen: Screen) {
+        if (shouldForceProfileSetup() && screen !is Screen.AddProfile) {
+            backStack.clear()
+            _currentScreen.value = Screen.AddProfile
+            return
+        }
         if (_currentScreen.value != screen) {
             backStack.add(_currentScreen.value)
             _currentScreen.value = screen
@@ -442,6 +519,12 @@ class SpotifyViewModel(
      * @param screen The target [Screen] to display.
      */
     fun navigateTopLevel(screen: Screen) {
+        if (shouldForceProfileSetup() && screen !is Screen.AddProfile) {
+            backStack.clear()
+            _showNowPlaying.value = false
+            _currentScreen.value = Screen.AddProfile
+            return
+        }
         _showNowPlaying.value = false // Force overlay to close
         if (_currentScreen.value != screen) {
             backStack.clear() // Prevent infinite history loop
@@ -451,6 +534,7 @@ class SpotifyViewModel(
     }
 
     private fun handleScreenEntered(screen: Screen) {
+        if (shouldForceProfileSetup() && screen !is Screen.AddProfile) return
         when (screen) {
             is Screen.Home -> loadHomeFeed()
             is Screen.Search -> Unit
@@ -462,12 +546,16 @@ class SpotifyViewModel(
             is Screen.PodcastDetail -> loadShowEpisodes(screen.id)
             is Screen.Queue -> loadQueue()
             is Screen.Settings -> loadDevices()
+            is Screen.HomeLayoutSettings -> Unit
             is Screen.AddProfile -> Unit
             else -> {}
         }
     }
 
-    fun openNowPlaying() { _showNowPlaying.value = true }
+    fun openNowPlaying() {
+        _showNowPlaying.value = true
+        refreshPlaybackStateNow()
+    }
     fun closeNowPlaying() { _showNowPlaying.value = false }
 
     /**
@@ -478,6 +566,12 @@ class SpotifyViewModel(
      * 2. Otherwise pop the back-stack; default to [Screen.Home] if empty.
      */
     fun navigateBack() {
+        if (shouldForceProfileSetup()) {
+            _showNowPlaying.value = false
+            backStack.clear()
+            _currentScreen.value = Screen.AddProfile
+            return
+        }
         if (_showNowPlaying.value) {
             _showNowPlaying.value = false
             return
@@ -487,6 +581,8 @@ class SpotifyViewModel(
         _currentScreen.value = previous
         handleScreenEntered(previous)
     }
+
+    private fun shouldForceProfileSetup(): Boolean = userProfiles.value.isEmpty()
 
     // ── Data Loading ─────────────────────────────────────────────────
 
@@ -533,6 +629,7 @@ class SpotifyViewModel(
                     }
                     launch { loadRecentlyPlayed() }
                     launch { loadSavedShows() }
+                    launch { loadCustomMixArt() }
                     val topArtists = topArtistsDeferred.await()
                     launch { loadFeatured(topArtists) }
                     launch { loadNewReleases(topArtists) }
@@ -542,6 +639,64 @@ class SpotifyViewModel(
             } finally {
                 _isHomeLoading.value = false
             }
+        }
+    }
+
+    /**
+     * Pre-loads 4 representative album-art URLs per custom mix for the
+     * 2×2 grid tiles on the home screen.
+     *
+     * - **Decade mixes** (80s, 90s, 2000s, 2010s): picks 4 saved tracks
+     *   whose album release-date starts with the decade prefix and extracts
+     *   distinct album cover-art URLs.
+     * - **Daily Drive**: uses the first 2 saved podcast show images plus
+     *   the first 2 saved-track album covers.
+     *
+     * Runs on [Dispatchers.IO] and is launched in parallel with the other
+     * home-feed loaders so it doesn't block the UI.
+     */
+    private suspend fun loadCustomMixArt() = withContext(Dispatchers.IO) {
+        try {
+            if (_customMixArt.value.isNotEmpty()) return@withContext
+
+            val savedTracks = libraryRepository.getSavedTracks(maxTracks = 200)
+            val artMap = mutableMapOf<String, List<String>>()
+
+            // Decade mixes — extract 4 unique album covers per decade
+            val decadePrefixes = mapOf(
+                CUSTOM_MIX_80S to "198",
+                CUSTOM_MIX_90S to "199",
+                CUSTOM_MIX_2000S to "200",
+                CUSTOM_MIX_2010S to "201"
+            )
+            for ((mixId, prefix) in decadePrefixes) {
+                val arts = savedTracks
+                    .filter { it.album?.releaseDate?.startsWith(prefix) == true }
+                    .mapNotNull { bestArtwork(it.album?.images) }
+                    .distinct()
+                    .shuffled()
+                    .take(4)
+                if (arts.isNotEmpty()) artMap[mixId] = arts
+            }
+
+            // Daily Drive — 2 podcast covers + 2 track covers
+            val shows = _savedShows.value.ifEmpty { libraryRepository.getSavedShows() }
+            val podcastArts = shows
+                .mapNotNull { bestArtwork(it.images) }
+                .distinct()
+                .take(2)
+            val trackArts = savedTracks
+                .mapNotNull { bestArtwork(it.album?.images) }
+                .distinct()
+                .shuffled()
+                .take(2)
+            val dailyDriveArts = podcastArts + trackArts
+            if (dailyDriveArts.isNotEmpty()) artMap[CUSTOM_MIX_DAILY_DRIVE] = dailyDriveArts
+
+            _customMixArt.value = artMap
+            Log.d(TAG, "Custom mix art loaded for ${artMap.size} mixes")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not load custom mix art: ${e.message}")
         }
     }
 
@@ -1057,13 +1212,24 @@ class SpotifyViewModel(
 
     fun loadQueue() {
         viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val response = api.getQueue()
-                _queue.value = response.queue
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to load queue: ${e.message}")
-            }
+            syncQueueState()
         }
+    }
+
+    private suspend fun syncQueueState(currentPlaybackUri: String? = _playbackState.value?.item?.uri) {
+        try {
+            val response = api.getQueue()
+            val currentUri = currentPlaybackUri ?: response.currentlyPlaying?.uri
+            _queue.value = normalizeQueue(response.queue, currentUri)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to load queue: ${e.message}")
+        }
+    }
+
+    private fun normalizeQueue(queueItems: List<SpotifyPlayableItem>, currentUri: String?): List<SpotifyPlayableItem> {
+        if (queueItems.isEmpty()) return emptyList()
+        if (currentUri.isNullOrBlank()) return queueItems
+        return if (queueItems.firstOrNull()?.uri == currentUri) queueItems.drop(1) else queueItems
     }
 
     // ── Playback Controls ────────────────────────────────────────────
@@ -1370,15 +1536,38 @@ class SpotifyViewModel(
      * The loop runs in [viewModelScope] so it is automatically cancelled
      * when the ViewModel is cleared (Activity destroyed).
      */
-    private fun startMetadataSync() {
+    private fun startMetadataSync(
+        forceRestart: Boolean = false,
+        immediateSync: Boolean = false
+    ) {
+        if (forceRestart) {
+            metadataSyncJob?.cancel()
+            metadataSyncJob = null
+        }
+
+        if (metadataSyncJob?.isActive == true) {
+            if (immediateSync) {
+                viewModelScope.launch { syncPlaybackState() }
+            }
+            return
+        }
+
         metadataSyncJob = viewModelScope.launch {
-            while (isActive) {
+            var skipNextLoopSync = false
+            if (immediateSync) {
                 syncPlaybackState()
-                
-                // Smart Backoff: Poll fast if playing, poll slow if paused/idle
+                skipNextLoopSync = true
+            }
+
+            while (isActive) {
+                if (skipNextLoopSync) {
+                    skipNextLoopSync = false
+                } else {
+                    syncPlaybackState()
+                }
+
                 val isPlaying = _playbackState.value?.isPlaying == true
-                val delayTime = if (isPlaying) METADATA_POLL_MS else 10000L 
-                
+                val delayTime = if (isPlaying) METADATA_POLL_MS else 4000L
                 delay(delayTime)
             }
         }
@@ -1398,11 +1587,19 @@ class SpotifyViewModel(
      */
     private suspend fun syncPlaybackState() {
         try {
+            val previousItemUri = _playbackState.value?.item?.uri
             val playback = playbackController.getCurrentPlayback()
             if (playback != null) {
                 _isOffline.value = false
                 _deviceNotFoundError.value = false // Auto-clear error when device is detected
                 _playbackState.value = playback
+                val currentItemUri = playback.item?.uri
+                val playbackItemChanged = currentItemUri != previousItemUri
+
+                if (_currentScreen.value is Screen.Queue || playbackItemChanged) {
+                    syncQueueState(currentItemUri)
+                }
+
                 // Check if current track is saved
                 playback.item?.id?.let { trackId ->
                     if (trackId != lastSavedStatusTrackId && playback.item?.type == "track") {
@@ -1415,6 +1612,9 @@ class SpotifyViewModel(
                 }
             } else {
                 _playbackState.update { it?.copy(isPlaying = false) }
+                if (_currentScreen.value is Screen.Queue) {
+                    syncQueueState()
+                }
             }
         } catch (e: GlobalRateLimitException) {
             handleApiFailure(e)
@@ -1512,21 +1712,11 @@ class SpotifyViewModel(
 
         viewModelScope.launch(Dispatchers.IO) {
             tokenManager.setActiveProfileId(profileId)
-            clearProfileScopedData()
-            loadLockedDeviceSetting()
-            loadHomeFeed()
-            loadLibrary()
-            loadDevices()
         }
     }
 
     fun onProfileAdded() {
-        viewModelScope.launch(Dispatchers.IO) {
-            clearProfileScopedData()
-            loadLockedDeviceSetting()
-            loadHomeFeed()
-            loadLibrary()
-        }
+        refreshPlaybackStateNow()
     }
 
     private suspend fun clearProfileScopedData() {
@@ -1683,6 +1873,41 @@ class SpotifyViewModel(
     }
     fun updateExplicitFilterEnabled(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) { tokenManager.saveExplicitFilterEnabled(enabled) }
+    }
+    fun moveHomeSectionUp(section: HomeSection) {
+        updateHomeSectionOrder { current ->
+            val index = current.indexOf(section)
+            if (index <= 0) current else current.toMutableList().apply {
+                removeAt(index)
+                add(index - 1, section)
+            }
+        }
+    }
+
+    fun moveHomeSectionDown(section: HomeSection) {
+        updateHomeSectionOrder { current ->
+            val index = current.indexOf(section)
+            if (index == -1 || index >= current.lastIndex) current else current.toMutableList().apply {
+                removeAt(index)
+                add(index + 1, section)
+            }
+        }
+    }
+
+    fun resetHomeSectionOrder() {
+        viewModelScope.launch(Dispatchers.IO) {
+            tokenManager.saveHomeSectionOrder(HomeSection.defaultOrder.map { it.storageKey })
+        }
+    }
+
+    private fun updateHomeSectionOrder(transform: (List<HomeSection>) -> List<HomeSection>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = HomeSection.fromStorageKeys(
+                transform(homeSectionOrder.value)
+                    .map { it.storageKey }
+            )
+            tokenManager.saveHomeSectionOrder(updated.map { it.storageKey })
+        }
     }
 
     fun playArtistTopTracks() {

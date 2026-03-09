@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.cloudbridge.spotify.network.model.CurrentPlaybackResponse
 import com.cloudbridge.spotify.network.model.SpotifyPlayableItem
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.components.AlbumArtTile
@@ -90,8 +91,9 @@ fun QueueScreen(
         }
 
         // Currently Playing — big prominent card
-        playback?.item?.let { current ->
-            NowPlayingCard(item = current, onClick = { viewModel.openNowPlaying() })
+        val currentPlayback = playback
+        currentPlayback?.item?.let { current ->
+            NowPlayingCard(playback = currentPlayback, item = current, onClick = { viewModel.openNowPlaying() })
             HorizontalDivider(
                 color = SpotifyMediumGray.copy(alpha = 0.3f),
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
@@ -218,7 +220,15 @@ fun QueueScreen(
 }
 
 @Composable
-private fun NowPlayingCard(item: SpotifyPlayableItem, onClick: () -> Unit) {
+private fun NowPlayingCard(
+    playback: CurrentPlaybackResponse,
+    item: SpotifyPlayableItem,
+    onClick: () -> Unit
+) {
+    val durationMs = (item.durationMs ?: 1L).coerceAtLeast(1L)
+    val progressMs = (playback.progressMs ?: 0L).coerceAtLeast(0L)
+    val progress = (progressMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -272,6 +282,13 @@ private fun NowPlayingCard(item: SpotifyPlayableItem, onClick: () -> Unit) {
                 color = SpotifyLightGray,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth(),
+                color = SpotifyGreen,
+                trackColor = SpotifyMediumGray.copy(alpha = 0.35f)
             )
         }
     }

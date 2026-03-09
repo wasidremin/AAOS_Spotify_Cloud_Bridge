@@ -50,11 +50,13 @@ class CustomMixEngineTest {
                 ),
                 savedShows = listOf(
                     SpotifyShow(id = "news", name = "News", uri = "spotify:show:news"),
-                    SpotifyShow(id = "general", name = "General", uri = "spotify:show:general")
+                    SpotifyShow(id = "general", name = "General", uri = "spotify:show:general"),
+                    SpotifyShow(id = "talk", name = "Talk", uri = "spotify:show:talk")
                 ),
                 latestEpisodes = mapOf(
                     "news" to "spotify:episode:news1",
-                    "general" to "spotify:episode:general1"
+                    "general" to "spotify:episode:general1",
+                    "talk" to "spotify:episode:talk1"
                 ),
                 recommendations = listOf(
                     track(id = "5", uri = "spotify:track:r1"),
@@ -67,9 +69,13 @@ class CustomMixEngineTest {
         val result = engine.buildDailyDrive(newsShowId = "news")
 
         assertEquals("spotify:episode:news1", result[0])
-        assertTrue(result.take(5).contains("spotify:episode:general1"))
-        assertTrue(result.take(5).any { it.startsWith("spotify:track:l") })
-        assertTrue(result.take(5).any { it.startsWith("spotify:track:r") })
+        assertTrue(result[1].startsWith("spotify:track:"))
+        assertTrue(result[2].startsWith("spotify:track:"))
+        assertEquals("spotify:episode:general1", result[3])
+        assertTrue(result[4].startsWith("spotify:track:"))
+        assertTrue(result[5].startsWith("spotify:track:"))
+        assertEquals("spotify:episode:talk1", result[6])
+        assertTrue(result.contains("spotify:episode:talk1"))
         assertTrue(result.any { it == "spotify:track:l3" || it == "spotify:track:l4" })
         assertTrue(result.contains("spotify:track:r2"))
         assertEquals(result.distinct().size, result.size)

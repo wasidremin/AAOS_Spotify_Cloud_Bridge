@@ -1,6 +1,7 @@
 package com.cloudbridge.spotify
 
 import android.app.Application
+import android.os.Build
 import com.cloudbridge.spotify.auth.TokenManager
 import com.cloudbridge.spotify.cache.CacheDatabase
 import com.cloudbridge.spotify.cache.UserProfile
@@ -75,6 +76,11 @@ class SpotifyCloudBridgeApp : Application() {
             context = this,
             userProfileDao = cacheDatabase.userProfileDao()
         )
+        if (!Build.FINGERPRINT.contains("robolectric", ignoreCase = true)) {
+            runBlocking {
+                tokenManager.migrateLegacyCredentialsIfNeeded()
+            }
+        }
 
         if (!isUnitTestEnvironment()) {
             runBlocking {

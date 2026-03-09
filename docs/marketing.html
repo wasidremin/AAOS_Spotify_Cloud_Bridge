@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Cloud-Bridge — Premium Spotify for Your Car</title>
+    <meta name="description" content="A custom Android Automotive OS app that brings a premium Spotify experience to your car's infotainment display. Browse, play, and control — all from the dashboard.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --spotify-green: #1DB954;
+            --spotify-green-dark: #1AA34A;
+            --spotify-black: #121212;
+            --spotify-dark: #181818;
+            --spotify-card: #282828;
+            --spotify-light-gray: #B3B3B3;
+            --spotify-white: #FFFFFF;
+            --accent-blue: #2563EB;
+            --accent-pink: #E11D48;
+            --accent-purple: #9333EA;
+            --accent-cyan: #0891B2;
+            --max-width: 1200px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: var(--spotify-black);
+            color: var(--spotify-white);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* ─── Navigation ─────────────────────────────────────── */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(18, 18, 18, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            transition: background 0.3s;
+        }
+
+        nav .nav-inner {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--spotify-white);
+        }
+
+        .nav-logo svg {
+            width: 32px;
+            height: 32px;
+            fill: var(--spotify-green);
+        }
+
+        .nav-logo span {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: -0.5px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 32px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--spotify-light-gray);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--spotify-white);
+        }
+
+        /* ─── Hero ────────────────────────────────────────────── */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 120px 32px 80px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(ellipse at 30% 20%, rgba(29, 185, 84, 0.12) 0%, transparent 50%),
+                        radial-gradient(ellipse at 70% 80%, rgba(37, 99, 235, 0.08) 0%, transparent 50%);
+            animation: heroGlow 8s ease-in-out infinite alternate;
+        }
+
+        @keyframes heroGlow {
+            0% { transform: translate(0, 0) scale(1); }
+            100% { transform: translate(-2%, 2%) scale(1.05); }
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+            max-width: 800px;
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(29, 185, 84, 0.12);
+            border: 1px solid rgba(29, 185, 84, 0.25);
+            border-radius: 999px;
+            padding: 8px 20px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--spotify-green);
+            margin-bottom: 32px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4.5rem);
+            font-weight: 900;
+            letter-spacing: -2px;
+            line-height: 1.05;
+            margin-bottom: 24px;
+        }
+
+        .hero h1 .gradient-text {
+            background: linear-gradient(135deg, var(--spotify-green), #34D399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 20px;
+            color: var(--spotify-light-gray);
+            max-width: 600px;
+            margin: 0 auto 40px;
+            line-height: 1.7;
+        }
+
+        .hero-cta {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 16px 32px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 16px;
+            text-decoration: none;
+            transition: all 0.2s;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--spotify-green);
+            color: var(--spotify-black);
+        }
+
+        .btn-primary:hover {
+            background: var(--spotify-green-dark);
+            transform: scale(1.03);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--spotify-white);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--spotify-white);
+            transform: scale(1.03);
+        }
+
+        /* ─── Screenshot Showcase ────────────────────────────── */
+        .showcase {
+            padding: 40px 32px 100px;
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+
+        .showcase-frame {
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 40px 80px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.06);
+            position: relative;
+        }
+
+        .showcase-frame img {
+            width: 100%;
+            display: block;
+        }
+
+        .showcase-frame::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 20px;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+            pointer-events: none;
+        }
+
+        /* ─── Section Common ─────────────────────────────────── */
+        section {
+            padding: 100px 32px;
+        }
+
+        .section-inner {
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 64px;
+        }
+
+        .section-label {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: var(--spotify-green);
+            margin-bottom: 16px;
+        }
+
+        .section-title {
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 800;
+            letter-spacing: -1.5px;
+            margin-bottom: 16px;
+        }
+
+        .section-subtitle {
+            font-size: 18px;
+            color: var(--spotify-light-gray);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* ─── How It Works ───────────────────────────────────── */
+        .how-it-works {
+            background: var(--spotify-dark);
+        }
+
+        .flow-steps {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 48px;
+            position: relative;
+        }
+
+        .flow-steps::before {
+            content: '';
+            position: absolute;
+            top: 40px;
+            left: 15%;
+            right: 15%;
+            height: 2px;
+            background: linear-gradient(to right, transparent, var(--spotify-green), transparent);
+            opacity: 0.3;
+        }
+
+        .step {
+            text-align: center;
+            position: relative;
+        }
+
+        .step-number {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--spotify-green), #34D399);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            font-weight: 900;
+            color: var(--spotify-black);
+            margin: 0 auto 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .step h3 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        .step p {
+            color: var(--spotify-light-gray);
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        /* ─── Features Grid ──────────────────────────────────── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 24px;
+        }
+
+        .feature-card {
+            background: var(--spotify-dark);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 36px;
+            transition: all 0.3s;
+        }
+
+        .feature-card:hover {
+            border-color: rgba(29, 185, 84, 0.3);
+            transform: translateY(-4px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .feature-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+
+        .feature-card h3 {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .feature-card p {
+            color: var(--spotify-light-gray);
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        /* ─── Screenshots Gallery ────────────────────────────── */
+        .gallery {
+            background: var(--spotify-dark);
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+        }
+
+        .gallery-item {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .gallery-item:hover {
+            transform: scale(1.02);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .gallery-item img {
+            width: 100%;
+            display: block;
+        }
+
+        .gallery-caption {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 40px 24px 20px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+        }
+
+        .gallery-caption h4 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .gallery-caption p {
+            font-size: 14px;
+            color: var(--spotify-light-gray);
+        }
+
+        /* ─── Tech Stack ─────────────────────────────────────── */
+        .tech-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .tech-item {
+            background: var(--spotify-card);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 24px;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+
+        .tech-item:hover {
+            border-color: rgba(29, 185, 84, 0.3);
+        }
+
+        .tech-item .tech-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+        }
+
+        .tech-item h4 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .tech-item p {
+            font-size: 13px;
+            color: var(--spotify-light-gray);
+        }
+
+        /* ─── Architecture Diagram ───────────────────────────── */
+        .arch-flow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 40px 0;
+        }
+
+        .arch-node {
+            background: var(--spotify-card);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 20px 28px;
+            text-align: center;
+            min-width: 160px;
+        }
+
+        .arch-node.highlight {
+            border-color: var(--spotify-green);
+            box-shadow: 0 0 20px rgba(29, 185, 84, 0.15);
+        }
+
+        .arch-node h4 {
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .arch-node p {
+            font-size: 12px;
+            color: var(--spotify-light-gray);
+        }
+
+        .arch-arrow {
+            font-size: 24px;
+            color: var(--spotify-green);
+            font-weight: 700;
+        }
+
+        /* ─── CTA Section ────────────────────────────────────── */
+        .cta-section {
+            text-align: center;
+            padding: 120px 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cta-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(ellipse at center, rgba(29, 185, 84, 0.08) 0%, transparent 70%);
+        }
+
+        .cta-section h2 {
+            font-size: clamp(2rem, 4vw, 3rem);
+            font-weight: 800;
+            letter-spacing: -1.5px;
+            margin-bottom: 16px;
+            position: relative;
+        }
+
+        .cta-section p {
+            font-size: 18px;
+            color: var(--spotify-light-gray);
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        /* ─── Footer ─────────────────────────────────────────── */
+        footer {
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 40px 32px;
+            text-align: center;
+        }
+
+        footer p {
+            font-size: 14px;
+            color: rgba(179, 179, 179, 0.5);
+        }
+
+        footer a {
+            color: var(--spotify-green);
+            text-decoration: none;
+        }
+
+        /* ─── Responsive ─────────────────────────────────────── */
+        @media (max-width: 768px) {
+            .nav-links { display: none; }
+            .flow-steps { grid-template-columns: 1fr; gap: 40px; }
+            .flow-steps::before { display: none; }
+            .features-grid { grid-template-columns: 1fr; }
+            .gallery-grid { grid-template-columns: 1fr; }
+            .arch-flow { flex-direction: column; }
+            .arch-arrow { transform: rotate(90deg); }
+            section { padding: 60px 20px; }
+            .hero { padding: 100px 20px 60px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ─── Navigation ─────────────────────────────────────────────── -->
+<nav>
+    <div class="nav-inner">
+        <a href="#" class="nav-logo">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+            </svg>
+            <span>Cloud-Bridge</span>
+        </a>
+        <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#screenshots">Screenshots</a></li>
+            <li><a href="#how-it-works">How It Works</a></li>
+            <li><a href="#tech-stack">Tech Stack</a></li>
+            <li><a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" target="_blank">GitHub</a></li>
+        </ul>
+    </div>
+</nav>
+
+<!-- ─── Hero ───────────────────────────────────────────────────── -->
+<section class="hero">
+    <div class="hero-content">
+        <div class="hero-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
+            Android Automotive OS
+        </div>
+        <h1>
+            Premium Spotify<br>
+            <span class="gradient-text">for Your Car</span>
+        </h1>
+        <p>
+            A custom-built automotive media app that brings the full Spotify experience to your car's infotainment display — without needing Android Auto or Apple CarPlay.
+        </p>
+        <div class="hero-cta">
+            <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                View on GitHub
+            </a>
+            <a href="#features" class="btn btn-secondary">
+                Explore Features
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- ─── Hero Screenshot ────────────────────────────────────────── -->
+<div class="showcase">
+    <div class="showcase-frame">
+        <img src="images/marketing_home.png" alt="Spotify Cloud-Bridge Home Screen on an automotive display">
+    </div>
+</div>
+
+<!-- ─── How It Works ───────────────────────────────────────────── -->
+<section class="how-it-works" id="how-it-works">
+    <div class="section-inner">
+        <div class="section-header">
+            <p class="section-label">How It Works</p>
+            <h2 class="section-title">The Cloud-Bridge Pattern</h2>
+            <p class="section-subtitle">No local audio playback. Your phone does the heavy lifting while your car does the browsing.</p>
+        </div>
+
+        <div class="flow-steps">
+            <div class="step">
+                <div class="step-number">1</div>
+                <h3>Browse on the Dashboard</h3>
+                <p>The car's touchscreen displays a beautiful Compose UI with your playlists, albums, podcasts, and personalized mixes — all fetched via the Spotify Web API.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">2</div>
+                <h3>Play on Your Phone</h3>
+                <p>When you tap play, a REST API call targets Spotify on your phone as the playback device. Your phone handles all audio decoding and streaming.</p>
+            </div>
+            <div class="step">
+                <div class="step-number">3</div>
+                <h3>Listen via Bluetooth</h3>
+                <p>Audio flows from your phone through Bluetooth A2DP to your car's speakers — the same way calls and music already work. Zero configuration needed.</p>
+            </div>
+        </div>
+
+        <div class="arch-flow">
+            <div class="arch-node highlight">
+                <h4>Car Display</h4>
+                <p>Jetpack Compose UI</p>
+            </div>
+            <span class="arch-arrow">→</span>
+            <div class="arch-node">
+                <h4>Spotify Web API</h4>
+                <p>REST Commands</p>
+            </div>
+            <span class="arch-arrow">→</span>
+            <div class="arch-node">
+                <h4>Your Phone</h4>
+                <p>Audio Playback</p>
+            </div>
+            <span class="arch-arrow">→</span>
+            <div class="arch-node highlight">
+                <h4>Car Speakers</h4>
+                <p>Bluetooth A2DP</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── Features ───────────────────────────────────────────────── -->
+<section id="features">
+    <div class="section-inner">
+        <div class="section-header">
+            <p class="section-label">Features</p>
+            <h2 class="section-title">Everything You Need, <br>Designed for Driving</h2>
+            <p class="section-subtitle">Built specifically for automotive displays — large touch targets, glanceable layouts, and zero distraction overhead.</p>
+        </div>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">🏠</div>
+                <h3>Smart Home Screen</h3>
+                <p>A personalized dashboard with Jump Back In, Your Podcasts, Custom Mixes, Pinned Favorites, Suggested For You, and New Releases — all reorderable from Settings.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🎵</div>
+                <h3>Custom Mixes</h3>
+                <p>Daily Drive blends your podcasts with liked songs. Decade mixes (80s, 90s, 2000s, 2010s) are built from your saved tracks and Spotify recommendations — with 2×2 album art grids.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(225, 29, 72, 0.12); color: var(--accent-pink);">🎙️</div>
+                <h3>Podcast Intelligence</h3>
+                <p>New episode badges on your saved shows. Set any show as your Daily Drive news source. Full episode listing with one-tap playback and progress tracking.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(147, 51, 234, 0.12); color: var(--accent-purple);">🔍</div>
+                <h3>Automotive Search</h3>
+                <p>Full-text search across tracks, albums, and playlists with a 4-column results grid. Debounced input and large keyboard-friendly text fields built for driving.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(8, 145, 178, 0.12); color: var(--accent-cyan);">📚</div>
+                <h3>Full Library Access</h3>
+                <p>Browse playlists, albums, artists, and podcasts with sortable lists, filterable views, and seamless grid/list toggle. Liked Songs always at the top.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">📌</div>
+                <h3>Pin Favorites</h3>
+                <p>Long-press any playlist, album, or podcast to pin it to your home screen for instant one-tap access. Rearrange and manage pins from a dedicated screen.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🎶</div>
+                <h3>Now Playing Experience</h3>
+                <p>Full-screen Now Playing with blurred album art background, progress slider, playback controls, shuffle/repeat, heart/unsave, and Start Radio — all updating in real time.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(225, 29, 72, 0.12); color: var(--accent-pink);">📱</div>
+                <h3>QR Code Onboarding</h3>
+                <p>Add Spotify profiles without typing in the car. Scan a QR code, authenticate on your phone, and credentials are securely relayed via Firebase to the car in seconds.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(147, 51, 234, 0.12); color: var(--accent-purple);">👥</div>
+                <h3>Multi-Profile Support</h3>
+                <p>Family car? No problem. Add multiple Spotify accounts and switch between them from Settings. Each profile switch clears the library cache for clean isolation.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(8, 145, 178, 0.12); color: var(--accent-cyan);">🧹</div>
+                <h3>Clean Swapper</h3>
+                <p>Toggle a family-friendly mode that automatically replaces explicit tracks with clean versions when Spotify has a matching alternative. Persists across sessions.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">🎛️</div>
+                <h3>Queue Management</h3>
+                <p>View and manage your up-next queue with swipe-to-dismiss. Shows tracks, podcast episodes, and audiobook chapters with real-time progress on the current item.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🛡️</div>
+                <h3>Resilient by Design</h3>
+                <p>Automatic token refresh, offline detection, global rate-limit lockout, and graceful degradation. Built to survive spotty cell coverage on long drives.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── Screenshots ────────────────────────────────────────────── -->
+<section class="gallery" id="screenshots">
+    <div class="section-inner">
+        <div class="section-header">
+            <p class="section-label">Screenshots</p>
+            <h2 class="section-title">See It in Action</h2>
+            <p class="section-subtitle">Running on an Android Automotive OS emulator with an ultra-wide automotive display.</p>
+        </div>
+
+        <div class="gallery-grid">
+            <div class="gallery-item">
+                <img src="images/marketing_home.png" alt="Home Screen" loading="lazy">
+                <div class="gallery-caption">
+                    <h4>Home Screen</h4>
+                    <p>Personalized dashboard with Jump Back In, podcasts, and a greeting card</p>
+                </div>
+            </div>
+            <div class="gallery-item">
+                <img src="images/marketing_nowplaying.png" alt="Now Playing" loading="lazy">
+                <div class="gallery-caption">
+                    <h4>Now Playing</h4>
+                    <p>Full-screen playback view with blurred background and live controls</p>
+                </div>
+            </div>
+            <div class="gallery-item">
+                <img src="images/marketing_library.png" alt="Library" loading="lazy">
+                <div class="gallery-caption">
+                    <h4>Library</h4>
+                    <p>Playlists, albums, artists, and podcasts with sort and filter</p>
+                </div>
+            </div>
+            <div class="gallery-item">
+                <img src="images/marketing_queue.png" alt="Queue" loading="lazy">
+                <div class="gallery-caption">
+                    <h4>Queue</h4>
+                    <p>Up-next queue with current track progress and swipe management</p>
+                </div>
+            </div>
+            <div class="gallery-item">
+                <img src="images/marketing_home_mixes.png" alt="Custom Mixes" loading="lazy">
+                <div class="gallery-caption">
+                    <h4>Custom Mixes</h4>
+                    <p>Daily Drive, decade mixes with album art grids from your library</p>
+                </div>
+            </div>
+            <div class="gallery-item">
+                <img src="images/marketing_settings.png" alt="Settings" loading="lazy">
+                <div class="gallery-caption">
+                    <h4>Settings</h4>
+                    <p>Profile management, home layout editor, grid size, and display options</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── Tech Stack ─────────────────────────────────────────────── -->
+<section id="tech-stack">
+    <div class="section-inner">
+        <div class="section-header">
+            <p class="section-label">Tech Stack</p>
+            <h2 class="section-title">Built with Modern Android</h2>
+            <p class="section-subtitle">100% Kotlin with a fully declarative UI and reactive state management.</p>
+        </div>
+
+        <div class="tech-grid">
+            <div class="tech-item">
+                <div class="tech-icon">🟣</div>
+                <h4>Kotlin 2.0</h4>
+                <p>100% Kotlin codebase</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🎨</div>
+                <h4>Jetpack Compose</h4>
+                <p>Material3 + Custom Themes</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🌐</div>
+                <h4>Retrofit + OkHttp</h4>
+                <p>Type-safe REST Client</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🔄</div>
+                <h4>Coroutines + Flow</h4>
+                <p>Reactive State Management</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🗄️</div>
+                <h4>Room + DataStore</h4>
+                <p>Offline Cache + Prefs</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🖼️</div>
+                <h4>Coil</h4>
+                <p>Async Image Loading</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🎵</div>
+                <h4>Media3</h4>
+                <p>Steering Wheel Controls</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🔥</div>
+                <h4>Firebase RTDB</h4>
+                <p>QR Onboarding Relay</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">📄</div>
+                <h4>Moshi + KSP</h4>
+                <p>Compile-time JSON</p>
+            </div>
+            <div class="tech-item">
+                <div class="tech-icon">🚗</div>
+                <h4>AAOS API 35</h4>
+                <p>Automotive OS Target</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── CTA ────────────────────────────────────────────────────── -->
+<section class="cta-section">
+    <h2 class="section-title">Ready to Upgrade Your Drive?</h2>
+    <p>Open source and built for automotive enthusiasts.</p>
+    <div class="hero-cta">
+        <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            View on GitHub
+        </a>
+    </div>
+</section>
+
+<!-- ─── Footer ─────────────────────────────────────────────────── -->
+<footer>
+    <p>
+        Spotify Cloud-Bridge &mdash; Built with Kotlin, Jetpack Compose & the Spotify Web API<br>
+        <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge">github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge</a>
+    </p>
+</footer>
+
+</body>
+</html>

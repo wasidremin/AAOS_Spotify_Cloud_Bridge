@@ -105,8 +105,13 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 - Library tab selection persists via `SpotifyViewModel.libraryTab`, so returning from detail screens keeps context.
 - Library tabs now support in-memory filtering plus local sort modes (for example alphabetical, creator/publisher, and recently added) without hitting Spotify again.
 - Settings now shows all stored Spotify profiles and provides an **Add profile with QR code** entry point.
+- Settings now includes a **Home screen order** editor so users can rearrange sections like Jump Back In, Podcasts, and New Releases.
 - Phase 1 multi-profile auth stores only the active profile ID in DataStore; each profile's Spotify credentials now live in Room as `user_profiles` rows.
-- QR onboarding generates a one-time cloud-relay session code, renders it as a QR code, polls for the relay payload, then switches the new profile active automatically.
+- The very first profile is now forced through QR onboarding before the rest of the app can be used.
+- QR onboarding generates a one-time cloud-relay session code, opens the GitHub Pages companion at https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/, polls for the relay payload, then switches the new profile active automatically.
+- The Add Profile relay now targets the Firebase Realtime Database endpoint `https://aaosspotiftycloudbridge-default-rtdb.firebaseio.com/`.
+- Upgrades from the older single-profile build migrate any legacy DataStore credentials into the new Room-backed profile store on startup so saved keys are preserved.
+- Daily Drive now leads with a podcast, follows with a shorter music block, then returns to podcast content sooner.
 - Profile switches currently clear cached library rows and pinned items before reload so one account's content cannot bleed into another account's UI.
 - Search uses a 750ms debounce and `imePadding()` so the on-screen keyboard does not obscure results.
 - Playlist/Artist detail rows show a speaker icon for the active track (not color-only), improving glanceability.

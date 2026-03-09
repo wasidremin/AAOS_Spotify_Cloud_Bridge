@@ -125,6 +125,13 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        if (::viewModel.isInitialized) {
+            viewModel.refreshPlaybackStateNow()
+        }
+    }
 }
 
 // ── Top-Level App Layout ─────────────────────────────────────────────
@@ -146,6 +153,7 @@ private fun CloudBridgeApp(
     onLaunchVoiceSearch: () -> Unit = {}
 ) {
     val currentScreen by viewModel.currentScreen.collectAsState()
+    val userProfiles by viewModel.userProfiles.collectAsState()
     val showNowPlaying by viewModel.showNowPlaying.collectAsState()
     val playback by viewModel.playbackState.collectAsState()
     val isOffline by viewModel.isOffline.collectAsState()
@@ -161,8 +169,9 @@ private fun CloudBridgeApp(
         }
     }
     val rateLimitActive = rateLimitUntilEpochMs > now
+    val hasProfiles = userProfiles.isNotEmpty()
 
-    BackHandler(enabled = showNowPlaying || currentScreen !is SpotifyViewModel.Screen.Home) {
+    BackHandler(enabled = hasProfiles && (showNowPlaying || currentScreen !is SpotifyViewModel.Screen.Home)) {
         if (showNowPlaying) {
             viewModel.closeNowPlaying()
         } else {
@@ -197,13 +206,16 @@ private fun CloudBridgeApp(
                                 currentScreen is SpotifyViewModel.Screen.PodcastDetail
                         NavItem.Queue -> currentScreen is SpotifyViewModel.Screen.Queue
                         NavItem.Settings -> currentScreen is SpotifyViewModel.Screen.Settings ||
+                            currentScreen is SpotifyViewModel.Screen.HomeLayoutSettings ||
                                 currentScreen is SpotifyViewModel.Screen.AddProfile
                         NavItem.NowPlaying -> showNowPlaying // <-- ADD THIS
                     }
 
                     NavigationRailItem(
                         selected = selected,
+                        enabled = hasProfiles || item == NavItem.Settings,
                         onClick = {
+                            if (!hasProfiles && item != NavItem.Settings) return@NavigationRailItem
                             when (item) {
                                 NavItem.Home -> viewModel.navigateTopLevel(SpotifyViewModel.Screen.Home)
                                 NavItem.Search -> viewModel.navigateTopLevel(SpotifyViewModel.Screen.Search)
@@ -270,9 +282,10 @@ private fun CloudBridgeApp(
                             is SpotifyViewModel.Screen.PodcastDetail -> PodcastDetailScreen(viewModel, screen, innerPadding)
                             is SpotifyViewModel.Screen.Queue -> QueueScreen(viewModel, innerPadding)
                             is SpotifyViewModel.Screen.Settings -> SettingsScreen(viewModel, innerPadding)
+                            is SpotifyViewModel.Screen.HomeLayoutSettings -> HomeLayoutSettingsScreen(viewModel, innerPadding)
                             is SpotifyViewModel.Screen.AddProfile -> AddProfileScreen(
                                 viewModel = addProfileViewModel,
-                                onBack = { viewModel.navigateBack() },
+                                onBack = { if (hasProfiles) viewModel.navigateBack() },
                                 onCompleted = {
                                     viewModel.onProfileAdded()
                                     viewModel.navigateTopLevel(SpotifyViewModel.Screen.Settings)

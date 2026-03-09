@@ -123,6 +123,18 @@ Long Spotify `429 Retry-After` penalties must be persisted globally in `TokenMan
 - Append to `revisions.txt` with the new revision entry (see Section 7).
 - If you are producing a release artifact (`bundleRelease` / `assembleRelease`), also bump `versionCode` and `versionName` in `app/build.gradle.kts` before building so the AAB/APK is installable and uniquely versioned.
 
+### Step 6: GitHub Sync
+- Before editing, check whether the GitHub repository has moved:
+  - `git fetch origin`
+  - `git status -sb`
+  - `git log --oneline HEAD..origin/main`
+- If remote commits exist, rebase first with `git pull --rebase origin main`.
+- After the change is documented and validated, upload it:
+  - `git add -A`
+  - `git commit -m "<summary>"`
+  - `git push origin main`
+- Never upload secrets or generated credential artifacts; verify `.gitignore` coverage first.
+
 ## 6. Revision Numbering
 
 The project uses semantic revision numbers in the format `R<major>.<minor>`:
@@ -190,6 +202,13 @@ The file `revisions.txt` in the project root tracks all changes. Format:
 - Prefer native PowerShell invocation for Gradle.
 - Persist logs with `Tee-Object` so output is visible live and saved to disk.
 
+### GitHub Repository Hygiene
+- Always run `git fetch origin` before assuming the local checkout is current.
+- Use `git status -sb` before committing and before pushing.
+- Check remote updates with `git log --oneline HEAD..origin/main` and local unpublished commits with `git log --oneline origin/main..HEAD`.
+- Prefer `git pull --rebase origin main` for update sync unless the user explicitly requests a merge commit.
+- Only push after build, tests, emulator verification, and revision updates are complete.
+
 ## 9. Known Gotchas & Hard-Won Lessons
 
 ### Media3 Player Interface
@@ -222,6 +241,7 @@ The file `revisions.txt` in the project root tracks all changes. Format:
 - Gradle Kotlin DSL with version catalog at `gradle/libs.versions.toml`.
 - Use PowerShell-native Gradle invocation with `Tee-Object` for reliable live output plus a saved log.
 - Clean before build if seeing stale errors: `.\gradlew.bat clean assembleDebug`
+- In the VS Code PowerShell terminal, export `JAVA_HOME` to the Microsoft/OpenJDK 17 install before running Gradle if the shell has fallen back to Java 8, otherwise AGP 8.7.x fails before the build starts.
 
 ## 10. Spotify Scopes Required
 

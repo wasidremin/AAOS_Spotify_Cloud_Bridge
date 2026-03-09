@@ -25,7 +25,7 @@ class AddProfileViewModel(
 
     companion object {
         private const val POLL_INTERVAL_MS = 3000L
-        private const val WEB_APP_BASE_URL = "https://your-web-app.com"
+        private const val WEB_APP_BASE_URL = "https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/"
         private val SESSION_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
     }
 
@@ -65,7 +65,7 @@ class AddProfileViewModel(
         pollingJob?.cancel()
         val code = buildSessionCode()
         _sessionCode.value = code
-        _qrCodeUrl.value = "$WEB_APP_BASE_URL?code=$code"
+        _qrCodeUrl.value = "$WEB_APP_BASE_URL?session=$code"
         _isWaitingForProfile.value = true
         _isCompleting.value = false
         _isCompleted.value = false

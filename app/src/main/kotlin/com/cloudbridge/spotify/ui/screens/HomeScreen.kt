@@ -2,6 +2,7 @@ package com.cloudbridge.spotify.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -23,9 +24,11 @@ import androidx.compose.ui.unit.dp
 import com.cloudbridge.spotify.network.model.SpotifyAlbum
 import com.cloudbridge.spotify.network.model.SpotifyPlaylist
 import com.cloudbridge.spotify.network.model.SpotifyShow
+import com.cloudbridge.spotify.ui.HomeSection
 import com.cloudbridge.spotify.ui.PodcastUpdateInfo
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.components.AlbumArtTile
+import com.cloudbridge.spotify.ui.components.FourImageGrid
 import com.cloudbridge.spotify.ui.theme.SpotifyGreen
 import com.cloudbridge.spotify.ui.theme.SpotifyLightGray
 import com.cloudbridge.spotify.ui.theme.SpotifyWhite
@@ -66,7 +69,9 @@ fun HomeScreen(
     val playback by viewModel.playbackState.collectAsState()
     val playInstantly by viewModel.playInstantly.collectAsState()
     val explicitFilterEnabled by viewModel.explicitFilterEnabled.collectAsState()
+    val homeSectionOrder by viewModel.homeSectionOrder.collectAsState()
     val customMixes = viewModel.customMixes
+    val customMixArt by viewModel.customMixArt.collectAsState()
     val layoutDirection = LocalLayoutDirection.current
     val pinnedUris = androidx.compose.runtime.remember(pinnedItems) { pinnedItems.mapTo(mutableSetOf()) { it.uri } }
 
@@ -156,156 +161,237 @@ fun HomeScreen(
             }
         }
 
-        if (recentContexts.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHeader("Jump Back In")
-            }
-            items(
-                items = recentContexts.take(gridColumns),
-                key = { "recent-${it.uri}" }
-            ) { contextItem ->
-                AlbumArtTile(
-                    imageUrl = contextItem.imageUrl,
-                    title = contextItem.title,
-                    subtitle = contextItem.subtitle,
-                    isPinned = contextItem.uri in pinnedUris,
-                    onClick = {
-                        if (contextItem.type == "playlist") {
-                            viewModel.navigateTo(
-                                SpotifyViewModel.Screen.PlaylistDetail(
-                                    contextItem.id,
-                                    contextItem.title,
-                                    contextItem.uri
-                                )
-                            )
-                        } else if (contextItem.type == "album") {
-                            viewModel.navigateTo(
-                                SpotifyViewModel.Screen.AlbumDetail(
-                                    contextItem.id,
-                                    contextItem.title,
-                                    contextItem.uri
-                                )
-                            )
-                        }
-                    },
-                    onLongClick = {
-                        if (viewModel.isPinnableType(contextItem.type)) {
-                            viewModel.togglePinForRecentContext(contextItem)
-                        }
-                    }
+        homeSectionOrder.forEach { section ->
+            when (section) {
+                HomeSection.JumpBackIn -> addJumpBackInSection(
+                    recentContexts = recentContexts,
+                    gridColumns = gridColumns,
+                    pinnedUris = pinnedUris,
+                    viewModel = viewModel
+                )
+                HomeSection.Podcasts -> addPodcastSection(
+                    savedShows = savedShows,
+                    podcastUpdates = podcastUpdates,
+                    pinnedUris = pinnedUris,
+                    viewModel = viewModel
+                )
+                HomeSection.CustomMixes -> addCustomMixesSection(
+                    customMixes = customMixes,
+                    customMixArt = customMixArt,
+                    viewModel = viewModel
+                )
+                HomeSection.PinnedFavorites -> addPinnedFavoritesSection(
+                    pinnedItems = pinnedItems,
+                    viewModel = viewModel
+                )
+                HomeSection.SuggestedForYou -> addSuggestedSection(
+                    featuredPlaylists = featuredPlaylists,
+                    pinnedUris = pinnedUris,
+                    playInstantly = playInstantly,
+                    viewModel = viewModel
+                )
+                HomeSection.NewReleases -> addNewReleasesSection(
+                    newReleases = newReleases,
+                    pinnedUris = pinnedUris,
+                    viewModel = viewModel
                 )
             }
         }
 
-        // ── Your Podcasts (2nd — sorted by most recent episode) ─────
-        if (savedShows.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHeader("Your Podcasts")
-            }
-            items(items = savedShows, key = { "show-${it.id}" }) { show ->
-                PodcastTile(
-                    show = show,
-                    viewModel = viewModel,
-                    updateInfo = podcastUpdates[show.id],
-                    isPinned = show.uri in pinnedUris
-                )
-            }
-        }
+    }
+}
 
-        if (customMixes.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHeader("Your Custom Mixes")
-            }
-            items(
-                items = customMixes,
-                key = { "mix-${it.id}" }
-            ) { mix ->
-                AlbumArtTile(
-                    imageUrl = null,
-                    title = mix.title,
-                    subtitle = mix.subtitle,
-                    onClick = { viewModel.playCustomMix(mix.id) },
-                    artworkContent = {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(mix.colorHex)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (mix.id == SpotifyViewModel.CUSTOM_MIX_DAILY_DRIVE) {
-                                    Icons.Filled.DirectionsCar
-                                } else {
-                                    Icons.Filled.MusicNote
-                                },
-                                contentDescription = null,
-                                tint = SpotifyWhite.copy(alpha = 0.95f),
-                                modifier = Modifier.size(72.dp)
-                            )
-                        }
-                    }
-                )
-            }
-        }
+private fun LazyGridScope.addJumpBackInSection(
+    recentContexts: List<com.cloudbridge.spotify.ui.RecentContextItem>,
+    gridColumns: Int,
+    pinnedUris: Set<String>,
+    viewModel: SpotifyViewModel
+) {
+    if (recentContexts.isEmpty()) return
 
-        if (pinnedItems.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(end = 16.dp)
-                ) {
-                    SectionHeader("Pinned Favorites")
-                    TextButton(onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.ManagePins) }) {
-                        Text("Manage", color = SpotifyGreen, style = MaterialTheme.typography.titleMedium)
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        SectionHeader("Jump Back In")
+    }
+    items(
+        items = recentContexts.take(gridColumns),
+        key = { "recent-${it.uri}" }
+    ) { contextItem ->
+        AlbumArtTile(
+            imageUrl = contextItem.imageUrl,
+            title = contextItem.title,
+            subtitle = contextItem.subtitle,
+            isPinned = contextItem.uri in pinnedUris,
+            onClick = {
+                if (contextItem.type == "playlist") {
+                    viewModel.navigateTo(
+                        SpotifyViewModel.Screen.PlaylistDetail(
+                            contextItem.id,
+                            contextItem.title,
+                            contextItem.uri
+                        )
+                    )
+                } else if (contextItem.type == "album") {
+                    viewModel.navigateTo(
+                        SpotifyViewModel.Screen.AlbumDetail(
+                            contextItem.id,
+                            contextItem.title,
+                            contextItem.uri
+                        )
+                    )
+                }
+            },
+            onLongClick = {
+                if (viewModel.isPinnableType(contextItem.type)) {
+                    viewModel.togglePinForRecentContext(contextItem)
+                }
+            }
+        )
+    }
+}
+
+private fun LazyGridScope.addPodcastSection(
+    savedShows: List<SpotifyShow>,
+    podcastUpdates: Map<String, PodcastUpdateInfo>,
+    pinnedUris: Set<String>,
+    viewModel: SpotifyViewModel
+) {
+    if (savedShows.isEmpty()) return
+
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        SectionHeader("Your Podcasts")
+    }
+    items(items = savedShows, key = { "show-${it.id}" }) { show ->
+        PodcastTile(
+            show = show,
+            viewModel = viewModel,
+            updateInfo = podcastUpdates[show.id],
+            isPinned = show.uri in pinnedUris
+        )
+    }
+}
+
+private fun LazyGridScope.addCustomMixesSection(
+    customMixes: List<com.cloudbridge.spotify.ui.CustomMix>,
+    customMixArt: Map<String, List<String>>,
+    viewModel: SpotifyViewModel
+) {
+    if (customMixes.isEmpty()) return
+
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        SectionHeader("Your Custom Mixes")
+    }
+    items(
+        items = customMixes,
+        key = { "mix-${it.id}" }
+    ) { mix ->
+        val artUrls = customMixArt[mix.id].orEmpty()
+        AlbumArtTile(
+            imageUrl = null,
+            title = mix.title,
+            subtitle = mix.subtitle,
+            onClick = { viewModel.playCustomMix(mix.id) },
+            artworkContent = {
+                if (artUrls.isNotEmpty()) {
+                    FourImageGrid(
+                        imageUrls = artUrls,
+                        fallbackColor = Color(mix.colorHex),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(mix.colorHex)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (mix.id == SpotifyViewModel.CUSTOM_MIX_DAILY_DRIVE) {
+                                Icons.Filled.DirectionsCar
+                            } else {
+                                Icons.Filled.MusicNote
+                            },
+                            contentDescription = null,
+                            tint = SpotifyWhite.copy(alpha = 0.95f),
+                            modifier = Modifier.size(72.dp)
+                        )
                     }
                 }
             }
-            items(items = pinnedItems, key = { "pin-${it.uri}" }) { pin ->
-                AlbumArtTile(
-                    imageUrl = pin.imageUrl,
-                    title = pin.name,
-                    subtitle = pin.subtitle,
-                    isPinned = true,
-                    onClick = { viewModel.openPinnedItem(pin) },
-                    onLongClick = { viewModel.togglePin(pin) }
-                )
+        )
+    }
+}
+
+private fun LazyGridScope.addPinnedFavoritesSection(
+    pinnedItems: List<com.cloudbridge.spotify.cache.PinnedItem>,
+    viewModel: SpotifyViewModel
+) {
+    if (pinnedItems.isEmpty()) return
+
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(end = 16.dp)
+        ) {
+            SectionHeader("Pinned Favorites")
+            TextButton(onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.ManagePins) }) {
+                Text("Manage", color = SpotifyGreen, style = MaterialTheme.typography.titleMedium)
             }
         }
+    }
+    items(items = pinnedItems, key = { "pin-${it.uri}" }) { pin ->
+        AlbumArtTile(
+            imageUrl = pin.imageUrl,
+            title = pin.name,
+            subtitle = pin.subtitle,
+            isPinned = true,
+            onClick = { viewModel.openPinnedItem(pin) },
+            onLongClick = { viewModel.togglePin(pin) }
+        )
+    }
+}
 
-        // ── Suggested For You ───────────────────────────────────────
-        if (featuredPlaylists.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHeader("Suggested For You")
-            }
-            items(
-                items = featuredPlaylists.take(12),
-                key = { "feat-${it.id}" }
-            ) { playlist ->
-                PlaylistTile(
-                    playlist = playlist,
-                    viewModel = viewModel,
-                    playInstantly = playInstantly,
-                    isPinned = playlist.uri in pinnedUris
-                )
-            }
-        }
+private fun LazyGridScope.addSuggestedSection(
+    featuredPlaylists: List<SpotifyPlaylist>,
+    pinnedUris: Set<String>,
+    playInstantly: Boolean,
+    viewModel: SpotifyViewModel
+) {
+    if (featuredPlaylists.isEmpty()) return
 
-        // ── New Releases ─────────────────────────────────────────────
-        if (newReleases.isNotEmpty()) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                SectionHeader("New Releases")
-            }
-            items(
-                items = newReleases.take(12),
-                key = { "new-${it.id}" }
-            ) { album ->
-                AlbumTile(album = album, viewModel = viewModel, isPinned = (album.uri ?: "") in pinnedUris)
-            }
-        }
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        SectionHeader("Suggested For You")
+    }
+    items(
+        items = featuredPlaylists.take(12),
+        key = { "feat-${it.id}" }
+    ) { playlist ->
+        PlaylistTile(
+            playlist = playlist,
+            viewModel = viewModel,
+            playInstantly = playInstantly,
+            isPinned = playlist.uri in pinnedUris
+        )
+    }
+}
 
+private fun LazyGridScope.addNewReleasesSection(
+    newReleases: List<SpotifyAlbum>,
+    pinnedUris: Set<String>,
+    viewModel: SpotifyViewModel
+) {
+    if (newReleases.isEmpty()) return
+
+    item(span = { GridItemSpan(maxLineSpan) }) {
+        SectionHeader("New Releases")
+    }
+    items(
+        items = newReleases.take(12),
+        key = { "new-${it.id}" }
+    ) { album ->
+        AlbumTile(album = album, viewModel = viewModel, isPinned = (album.uri ?: "") in pinnedUris)
     }
 }
 

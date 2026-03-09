@@ -252,7 +252,7 @@ interface SpotifyApiService {
      */
     @GET("v1/me/player")
     suspend fun getCurrentPlayback(
-        @Query("additional_types") additionalTypes: String = "track,episode,chapter"
+        @Query("additional_types") additionalTypes: String = "episode"
     ): Response<CurrentPlaybackResponse>
 
     // ── Queue Management ─────────────────────────────────────────────

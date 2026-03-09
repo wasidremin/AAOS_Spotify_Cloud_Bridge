@@ -16,6 +16,31 @@ cd AAOS_Spotify_Cloud_Bridge
 
 Open the project in Android Studio. Gradle sync should start automatically.
 
+## Repository Sync Workflow
+
+- Check for upstream updates before starting work:
+
+```powershell
+git fetch origin
+git status -sb
+git log --oneline HEAD..origin/main
+```
+
+- Rebase local work on the latest remote branch when needed:
+
+```powershell
+git pull --rebase origin main
+```
+
+- After build, tests, and emulator verification pass, upload changes:
+
+```powershell
+git status -sb
+git add -A
+git commit -m "<summary>"
+git push origin main
+```
+
 ## 2. Create a Spotify Developer App
 
 1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
@@ -30,6 +55,8 @@ Open the project in Android Studio. Gradle sync should start automatically.
 
 Since this is a single-user app and AAOS doesn't have a browser for OAuth,
 you'll obtain a refresh token once on your computer and enter it into the app.
+
+If you're already upgrading from an older single-profile install, the app now migrates any previously saved DataStore credentials into the new profile database automatically on first launch so they are not lost.
 
 ### Option A — Automated Windows helper (recommended)
 

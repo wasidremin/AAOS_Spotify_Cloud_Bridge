@@ -29,9 +29,12 @@ class CustomMixEngine(
 
     suspend fun buildDailyDrive(newsShowId: String, savedShows: List<SpotifyShow>? = null): List<String> {
         val shows = savedShows ?: dataSource.getSavedShows()
-        val newsEpisodeUri = dataSource.getLatestEpisodeUri(newsShowId)
-        val generalShowId = shows.firstOrNull { it.id != newsShowId }?.id
-        val generalEpisodeUri = generalShowId?.let { dataSource.getLatestEpisodeUri(it) }
+        val podcastEpisodeUris = buildList {
+            dataSource.getLatestEpisodeUri(newsShowId)?.let(::add)
+            shows.filter { it.id != newsShowId }.forEach { show ->
+                dataSource.getLatestEpisodeUri(show.id)?.let(::add)
+            }
+        }.distinct()
 
         val likedTracks = dataSource.getSavedTracks(maxTracks = 50)
             .filter { it.uri.isNotBlank() }
@@ -45,21 +48,16 @@ class CustomMixEngine(
 
         val likedUris = selectedLikedTracks.map { it.uri }
         val recommendedUris = recommendedTracks.map { it.uri }
-        val masterUriList = mutableListOf<String>()
-        val seenUris = mutableSetOf<String>()
-
-        newsEpisodeUri?.let { appendUnique(masterUriList, seenUris, it) }
-        likedUris.take(2).forEach { appendUnique(masterUriList, seenUris, it) }
-        recommendedUris.firstOrNull()?.let { appendUnique(masterUriList, seenUris, it) }
-        generalEpisodeUri?.let { appendUnique(masterUriList, seenUris, it) }
-
-        val interleavedRemainder = buildAlternatingMix(
+        val musicUris = buildAlternatingMix(
             primaryUris = likedUris.drop(2),
-            secondaryUris = recommendedUris.drop(1)
+            secondaryUris = recommendedUris
         )
-        interleavedRemainder.forEach { appendUnique(masterUriList, seenUris, it) }
 
-        return masterUriList.take(maxGeneratedUris)
+        return buildPodcastLedDrive(
+            podcastUris = podcastEpisodeUris,
+            leadInMusicUris = likedUris.take(2),
+            musicUris = musicUris
+        )
     }
 
     private fun buildTwoToOneMix(ownedUris: List<String>, recommendedUris: List<String>): List<String> {
@@ -95,6 +93,35 @@ class CustomMixEngine(
             primaryUris.getOrNull(index)?.let { appendUnique(mixed, seenUris, it) }
             secondaryUris.getOrNull(index)?.let { appendUnique(mixed, seenUris, it) }
             if (mixed.size >= maxGeneratedUris) break
+        }
+
+        return mixed.take(maxGeneratedUris)
+    }
+
+    private fun buildPodcastLedDrive(
+        podcastUris: List<String>,
+        leadInMusicUris: List<String>,
+        musicUris: List<String>
+    ): List<String> {
+        val mixed = mutableListOf<String>()
+        val seenUris = mutableSetOf<String>()
+        val musicQueue = ArrayDeque(leadInMusicUris + musicUris)
+
+        podcastUris.forEachIndexed { index, podcastUri ->
+            if (index > 0 && musicQueue.isEmpty()) return@forEachIndexed
+            appendUnique(mixed, seenUris, podcastUri)
+
+            val songsAfterPodcast = 2
+            repeat(songsAfterPodcast) {
+                val nextSong = musicQueue.removeFirstOrNull() ?: return@repeat
+                appendUnique(mixed, seenUris, nextSong)
+            }
+
+            if (mixed.size >= maxGeneratedUris) return mixed.take(maxGeneratedUris)
+        }
+
+        while (musicQueue.isNotEmpty() && mixed.size < maxGeneratedUris) {
+            appendUnique(mixed, seenUris, musicQueue.removeFirst())
         }
 
         return mixed.take(maxGeneratedUris)

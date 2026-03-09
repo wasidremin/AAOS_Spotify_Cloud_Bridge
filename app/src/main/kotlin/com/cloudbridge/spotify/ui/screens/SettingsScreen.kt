@@ -194,6 +194,32 @@ fun SettingsScreen(
             }
 
             item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SpotifyDarkGray)
+                        .clickable { viewModel.navigateTo(SpotifyViewModel.Screen.HomeLayoutSettings) }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Home screen order",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = SpotifyWhite
+                        )
+                        Text(
+                            "Choose the order of sections like Jump Back In and Podcasts.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpotifyLightGray
+                        )
+                    }
+                    Icon(Icons.Default.Refresh, contentDescription = null, tint = SpotifyGreen)
+                }
+            }
+
+            item {
                 Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                     Text("Artwork Grid Columns: $gridColumns", color = SpotifyWhite)
                     Slider(

@@ -4,6 +4,9 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.cloudbridge.spotify.cache.UserProfile
 import com.cloudbridge.spotify.cache.UserProfileDao
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -144,6 +147,18 @@ class TokenManagerTest {
     }
 
     @Test
+    fun `home section order defaults empty and persists custom order`() = testScope.runTest {
+        assertEquals(emptyList<String>(), tokenManager.homeSectionOrderFlow.first())
+
+        tokenManager.saveHomeSectionOrder(listOf("podcasts", "jump_back_in", "new_releases"))
+
+        assertEquals(
+            listOf("podcasts", "jump_back_in", "new_releases"),
+            tokenManager.homeSectionOrderFlow.first()
+        )
+    }
+
+    @Test
     fun `explicit filter defaults off and persists`() = testScope.runTest {
         assertFalse(tokenManager.explicitFilterEnabledFlow.first())
 
@@ -166,6 +181,37 @@ class TokenManagerTest {
         tokenManager.clearRateLimitLockout()
         assertFalse(tokenManager.isRateLimitLockoutActive())
         assertEquals(0L, tokenManager.getRateLimitUntilEpochMs())
+    }
+
+    @Test
+    fun `migrateLegacyCredentialsIfNeeded moves legacy datastore keys into a profile`() = testScope.runTest {
+        dataStore.edit { prefs ->
+            prefs[stringPreferencesKey("client_id")] = "legacy_client"
+            prefs[stringPreferencesKey("client_secret")] = "legacy_secret"
+            prefs[stringPreferencesKey("refresh_token")] = "legacy_refresh"
+            prefs[stringPreferencesKey("access_token")] = "legacy_access"
+            prefs[longPreferencesKey("token_expiry_epoch_ms")] = 12345L
+        }
+
+        val migrated = tokenManager.migrateLegacyCredentialsIfNeeded()
+
+        assertTrue(migrated)
+
+        val profiles = userProfileDao.getAllOnce()
+        assertEquals(1, profiles.size)
+        assertEquals("legacy_client", profiles.first().clientId)
+        assertEquals("legacy_secret", profiles.first().clientSecret)
+        assertEquals("legacy_refresh", profiles.first().refreshToken)
+        assertEquals("legacy_access", profiles.first().accessToken)
+        assertEquals(12345L, profiles.first().tokenExpiryEpochMs)
+        assertEquals(profiles.first().id, tokenManager.activeProfileIdFlow.first())
+
+        val prefs = dataStore.data.first()
+        assertNull(prefs[stringPreferencesKey("client_id")])
+        assertNull(prefs[stringPreferencesKey("client_secret")])
+        assertNull(prefs[stringPreferencesKey("refresh_token")])
+        assertNull(prefs[stringPreferencesKey("access_token")])
+        assertNull(prefs[longPreferencesKey("token_expiry_epoch_ms")])
     }
 }
 
