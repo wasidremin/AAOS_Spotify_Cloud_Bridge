@@ -5,14 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spotify Cloud Bridge Setup</title>
     <style>
-        body { background-color: #121212; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .container { background-color: #181818; padding: 40px; border-radius: 16px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        body { background-color: #121212; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background-color: #181818; padding: 40px; border-radius: 16px; width: 100%; max-width: 450px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         h2 { color: #1DB954; margin-top: 0; }
         p { color: #B3B3B3; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
-        input { width: 100%; padding: 12px; margin-bottom: 16px; border-radius: 8px; border: 1px solid #333; background-color: #282828; color: white; box-sizing: border-box; }
-        button { background-color: #1DB954; color: black; border: none; padding: 14px; width: 100%; border-radius: 500px; font-weight: bold; font-size: 16px; cursor: pointer; transition: transform 0.1s; }
+        
+        /* New Instruction Box Styles */
+        .instructions { text-align: left; background-color: #282828; padding: 20px; border-radius: 12px; margin-bottom: 24px; font-size: 13px; color: #B3B3B3; border: 1px solid #333; }
+        .instructions p.title { margin-top: 0; margin-bottom: 12px; color: #FFFFFF; font-weight: 600; font-size: 14px; }
+        .instructions ol { margin: 0; padding-left: 20px; }
+        .instructions li { margin-bottom: 10px; line-height: 1.4; }
+        .instructions li:last-child { margin-bottom: 0; }
+        .instructions a { color: #1DB954; text-decoration: none; font-weight: 500; }
+        .instructions a:hover { text-decoration: underline; }
+        .instructions code { background-color: #121212; padding: 3px 6px; border-radius: 4px; font-size: 11px; word-break: break-all; color: #1DB954; border: 1px solid #333; display: inline-block; margin-top: 4px; }
+
+        input { width: 100%; padding: 14px; margin-bottom: 16px; border-radius: 8px; border: 1px solid #333; background-color: #121212; color: white; box-sizing: border-box; font-size: 14px; transition: border-color 0.2s; }
+        input:focus { outline: none; border-color: #1DB954; }
+        button { background-color: #1DB954; color: black; border: none; padding: 14px; width: 100%; border-radius: 500px; font-weight: bold; font-size: 16px; cursor: pointer; transition: transform 0.1s, background-color 0.2s; }
+        button:hover { background-color: #1ed760; }
         button:active { transform: scale(0.98); }
-        .hidden { display: none; }
+        .hidden { display: none !important; }
         .spinner { border: 4px solid #333; border-top: 4px solid #1DB954; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -21,9 +34,20 @@
 
 <div class="container" id="form-ui">
     <h2>Connect to Cloud Bridge</h2>
-    <p>Enter your Spotify Developer App credentials to link your profile to the car.</p>
-    <input type="text" id="clientId" placeholder="Spotify Client ID" required>
-    <input type="password" id="clientSecret" placeholder="Spotify Client Secret" required>
+    <p>Link your Spotify account to your car's media system.</p>
+
+    <div class="instructions">
+        <p class="title">How to get your credentials:</p>
+        <ol>
+            <li>Go to the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> and log in.</li>
+            <li>Click <strong>Create App</strong> (or open an existing one).</li>
+            <li>In the app Settings, ensure your <strong>Redirect URI</strong> is set exactly to:<br><code>https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/</code></li>
+            <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> below.</li>
+        </ol>
+    </div>
+
+    <input type="text" id="clientId" placeholder="Spotify Client ID" required autocomplete="off">
+    <input type="password" id="clientSecret" placeholder="Spotify Client Secret" required autocomplete="off">
     <button onclick="startAuth()">Connect Spotify</button>
 </div>
 
@@ -35,7 +59,7 @@
 
 <div class="container hidden" id="success-ui">
     <h2>Success!</h2>
-    <p>Your profile has been sent to the car. You can now close this window.</p>
+    <p>Your profile has been sent to the car. You can now close this window and look at your car's screen.</p>
 </div>
 
 <script>
@@ -54,13 +78,13 @@
         document.getElementById('loading-ui').classList.remove('hidden');
         exchangeTokenAndSendToCar(authCode, sessionState);
     } else if (!initialSession) {
-        document.getElementById('form-ui').innerHTML = "<h2>Invalid Link</h2><p>Please scan the QR code on your car screen again.</p>";
+        document.getElementById('form-ui').innerHTML = "<h2>Invalid Link</h2><p>Please scan the QR code on your car screen again to start a new session.</p>";
     }
 
     function startAuth() {
         const clientId = document.getElementById('clientId').value.trim();
         const clientSecret = document.getElementById('clientSecret').value.trim();
-        if (!clientId || !clientSecret) return alert("Please enter both ID and Secret.");
+        if (!clientId || !clientSecret) return alert("Please enter both your Client ID and Client Secret.");
 
         // Save credentials temporarily to survive the redirect
         sessionStorage.setItem('temp_client_id', clientId);
@@ -79,7 +103,7 @@
         sessionStorage.clear(); // Clean up
 
         if (!clientId || !clientSecret) {
-            document.getElementById('status-text').innerText = "Session lost. Please scan the QR code again.";
+            document.getElementById('status-text').innerText = "Session lost. Please scan the QR code on your car again.";
             return;
         }
 
@@ -98,7 +122,7 @@
             });
 
             const tokenData = await tokenResponse.json();
-            if (!tokenData.refresh_token) throw new Error("Failed to get refresh token");
+            if (!tokenData.refresh_token) throw new Error("Failed to get refresh token. Check if your Client Secret is correct.");
 
             document.getElementById('status-text').innerText = "Fetching your profile...";
             const profileResponse = await fetch(`https://api.spotify.com/v1/me`, {
