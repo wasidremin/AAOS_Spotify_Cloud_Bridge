@@ -2,6 +2,7 @@ package com.cloudbridge.spotify.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.components.ExplicitBadge
+import com.cloudbridge.spotify.ui.components.ExplicitBadgeSize
 import com.cloudbridge.spotify.ui.components.PlayerControls
 import com.cloudbridge.spotify.ui.theme.*
 import androidx.compose.foundation.layout.aspectRatio
@@ -50,6 +52,7 @@ import androidx.compose.foundation.layout.aspectRatio
 fun NowPlayingScreen(viewModel: SpotifyViewModel) {
     val playback by viewModel.playbackState.collectAsState()
     val isTrackSaved by viewModel.isTrackSaved.collectAsState()
+    val isSystemNightMode = isSystemInDarkTheme()
 
     val track = playback?.item
     val artUrl = viewModel.bestArtwork(track?.images ?: track?.album?.images ?: track?.show?.images ?: track?.audiobook?.images)
@@ -89,7 +92,7 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.3f))
+                .background(Color.Black.copy(alpha = if (isSystemNightMode) 0.72f else 0.48f))
         )
 
         // Layer 3: Split-screen content
@@ -128,7 +131,7 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                     )
                     if (track?.explicit == true && !isEpisode && !isChapter) {
                         Spacer(Modifier.width(12.dp))
-                        ExplicitBadge()
+                        ExplicitBadge(size = ExplicitBadgeSize.Large)
                     }
                 }
 
@@ -205,7 +208,10 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                     onRepeat = { viewModel.toggleRepeat() },
                     onHeart = { viewModel.toggleSaveTrack() },
                     onRadio = { viewModel.startRadioFromCurrentTrack() },
-                    onSeek = { viewModel.seekTo(it) }
+                    onSeek = { viewModel.seekTo(it) },
+                    showSkipButtons = isEpisode || isChapter,
+                    onSkipBack15 = { viewModel.skipBack15Seconds() },
+                    onSkipForward15 = { viewModel.skipForward15Seconds() }
                 )
 
                 Spacer(Modifier.height(16.dp))

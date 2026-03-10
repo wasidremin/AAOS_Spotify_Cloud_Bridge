@@ -1,6 +1,7 @@
 package com.cloudbridge.spotify.ui.screens
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -161,6 +162,7 @@ fun PlaylistDetailScreen(
                     key = { index, track -> "${track.id}-$index" }
                 ) { index, track ->
                     TrackRow(
+                        viewModel = viewModel,
                         track = track,
                         index = index + 1,
                         isCurrentlyPlaying = track.id == currentPlayingId,
@@ -178,8 +180,10 @@ fun PlaylistDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TrackRow(
+    viewModel: SpotifyViewModel,
     track: SpotifyTrack,
     index: Int,
     isCurrentlyPlaying: Boolean,
@@ -188,7 +192,10 @@ private fun TrackRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { viewModel.addTrackToQueue(track.uri) }
+            )
             .padding(horizontal = 24.dp, vertical = 20.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

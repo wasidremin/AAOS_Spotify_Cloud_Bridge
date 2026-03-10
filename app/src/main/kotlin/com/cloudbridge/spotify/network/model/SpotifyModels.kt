@@ -29,11 +29,11 @@ data class PlaylistsResponse(
 
 @JsonClass(generateAdapter = true)
 data class SpotifyPlaylist(
-    @Json(name = "id") val id: String,
-    @Json(name = "name") val name: String,
+    @Json(name = "id") val id: String?,
+    @Json(name = "name") val name: String?,
     @Json(name = "description") val description: String? = null,
     @Json(name = "images") val images: List<SpotifyImage>? = null,
-    @Json(name = "uri") val uri: String,
+    @Json(name = "uri") val uri: String?,
     @Json(name = "tracks") val tracks: PlaylistTracksRef? = null,
     @Json(name = "owner") val owner: SpotifyPlaylistOwner? = null
 )
@@ -47,7 +47,7 @@ data class SpotifyPlaylistOwner(
 /** Lightweight reference to tracks count (returned inside playlist objects). */
 @JsonClass(generateAdapter = true)
 data class PlaylistTracksRef(
-    @Json(name = "total") val total: Int
+    @Json(name = "total") val total: Int? = 0
 )
 
 // ─── Tracks ──────────────────────────────────────────────────────────

@@ -1,5 +1,6 @@
 package com.cloudbridge.spotify.ui
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -55,29 +56,50 @@ class AddProfileViewModel(
     private val _isCompleted = MutableStateFlow(false)
     val isCompleted: StateFlow<Boolean> = _isCompleted.asStateFlow()
 
+    private val _isRefreshSession = MutableStateFlow(false)
+    val isRefreshSession: StateFlow<Boolean> = _isRefreshSession.asStateFlow()
+
+    private val _refreshTargetName = MutableStateFlow<String?>(null)
+    val refreshTargetName: StateFlow<String?> = _refreshTargetName.asStateFlow()
+
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     private var pollingJob: Job? = null
     private val secureRandom = SecureRandom()
 
-    fun startNewSession() {
+    fun startNewSession(refreshProfileId: String? = null) {
         pollingJob?.cancel()
         val code = buildSessionCode()
         _sessionCode.value = code
-        _qrCodeUrl.value = "$WEB_APP_BASE_URL?session=$code"
+        _qrCodeUrl.value = ""
         _isWaitingForProfile.value = true
         _isCompleting.value = false
         _isCompleted.value = false
+        _isRefreshSession.value = !refreshProfileId.isNullOrBlank()
+        _refreshTargetName.value = null
         _errorMessage.value = null
 
         pollingJob = viewModelScope.launch {
+            val targetProfile = refreshProfileId?.let { userProfileDao.getById(it) }
+            if (!refreshProfileId.isNullOrBlank() && targetProfile == null) {
+                _isWaitingForProfile.value = false
+                _errorMessage.value = "Refresh target was not found. Return to Settings and try again."
+                return@launch
+            }
+
+            _isRefreshSession.value = targetProfile != null
+            _refreshTargetName.value = targetProfile?.name
+            _qrCodeUrl.value = buildSessionUrl(code, targetProfile)
+
             while (isActive && !_isCompleted.value) {
                 try {
                     val payload = cloudRelayService.getSession(code)
                     if (payload != null) {
                         _isCompleting.value = true
-                        val profile = UserProfile(
+                        val existingProfile = (payload.targetProfileId ?: refreshProfileId)
+                            ?.let { userProfileDao.getById(it) }
+                        val profile = (existingProfile ?: UserProfile(
                             id = UUID.randomUUID().toString(),
                             name = payload.profileName.ifBlank { "Spotify Profile" },
                             clientId = payload.clientId,
@@ -86,6 +108,16 @@ class AddProfileViewModel(
                             accessToken = null,
                             tokenExpiryEpochMs = 0L,
                             profileImageUrl = payload.profileImageUrl
+                        )).copy(
+                            name = payload.profileName.ifBlank {
+                                existingProfile?.name ?: "Spotify Profile"
+                            },
+                            clientId = payload.clientId,
+                            clientSecret = payload.clientSecret ?: existingProfile?.clientSecret,
+                            refreshToken = payload.refreshToken,
+                            accessToken = null,
+                            tokenExpiryEpochMs = 0L,
+                            profileImageUrl = payload.profileImageUrl ?: existingProfile?.profileImageUrl
                         )
                         userProfileDao.insert(profile)
                         tokenManager.setActiveProfileId(profile.id)
@@ -113,5 +145,23 @@ class AddProfileViewModel(
         repeat(6) {
             append(SESSION_ALPHABET[secureRandom.nextInt(SESSION_ALPHABET.size)])
         }
+    }
+
+    private fun buildSessionUrl(sessionCode: String, targetProfile: UserProfile?): String {
+        val builder = Uri.parse(WEB_APP_BASE_URL).buildUpon()
+            .appendQueryParameter("session", sessionCode)
+
+        if (targetProfile != null) {
+            builder
+                .appendQueryParameter("mode", "refresh")
+                .appendQueryParameter("profile_id", targetProfile.id)
+                .appendQueryParameter("client_id", targetProfile.clientId)
+
+            targetProfile.clientSecret
+                ?.takeIf { it.isNotBlank() }
+                ?.let { builder.appendQueryParameter("client_secret", it) }
+        }
+
+        return builder.build().toString()
     }
 }

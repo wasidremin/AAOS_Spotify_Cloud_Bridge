@@ -1,6 +1,7 @@
 package com.cloudbridge.spotify.ui.screens
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -99,7 +100,8 @@ fun PodcastDetailScreen(
                     EpisodeRow(
                         episode = episode,
                         isCurrentlyPlaying = episode.id == currentPlayingId,
-                        onClick = { viewModel.playTrack(trackUri = episode.uri, contextUri = screen.uri) }
+                        onClick = { viewModel.playTrack(trackUri = episode.uri, contextUri = screen.uri) },
+                        onLongClick = { viewModel.addEpisodeToQueue(episode.uri) }
                     )
                 }
             }
@@ -107,10 +109,19 @@ fun PodcastDetailScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EpisodeRow(episode: SpotifyEpisode, isCurrentlyPlaying: Boolean, onClick: () -> Unit) {
+private fun EpisodeRow(
+    episode: SpotifyEpisode,
+    isCurrentlyPlaying: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 24.dp, vertical = 24.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .padding(horizontal = 24.dp, vertical = 24.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.width(56.dp), contentAlignment = Alignment.CenterStart) {

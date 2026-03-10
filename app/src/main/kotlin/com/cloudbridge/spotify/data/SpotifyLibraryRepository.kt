@@ -48,7 +48,7 @@ class SpotifyLibraryRepository(
 
         cacheDb.libraryCacheDao().apply {
             clearPlaylists()
-            insertPlaylists(fresh.map { playlist -> playlist.toCachedPlaylist() })
+            insertPlaylists(fresh.mapNotNull { playlist -> playlist.toCachedPlaylist() })
         }
 
         return fresh
@@ -244,14 +244,18 @@ class SpotifyLibraryRepository(
         tracks = PlaylistTracksRef(trackCount)
     )
 
-    private fun SpotifyPlaylist.toCachedPlaylist(): CachedPlaylist = CachedPlaylist(
-        id = id,
-        name = name,
-        uri = uri,
-        imageUrl = images?.firstOrNull()?.url,
-        description = description,
-        trackCount = tracks?.total ?: 0
-    )
+    private fun SpotifyPlaylist.toCachedPlaylist(): CachedPlaylist? {
+        val safeId = id ?: return null
+        val safeUri = uri ?: return null
+        return CachedPlaylist(
+            id = safeId,
+            name = name ?: "Unknown Playlist",
+            uri = safeUri,
+            imageUrl = images?.firstOrNull()?.url,
+            description = description,
+            trackCount = tracks?.total ?: 0
+        )
+    }
 
     private fun CachedAlbum.toSpotifyAlbum(): SpotifyAlbum = SpotifyAlbum(
         id = id,

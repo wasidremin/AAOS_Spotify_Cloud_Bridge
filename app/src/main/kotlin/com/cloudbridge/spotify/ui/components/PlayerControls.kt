@@ -6,6 +6,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -64,6 +65,9 @@ fun PlayerControls(
     onHeart: () -> Unit,
     onRadio: () -> Unit,
     onSeek: (Long) -> Unit,
+    showSkipButtons: Boolean = false,
+    onSkipBack15: () -> Unit = {},
+    onSkipForward15: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isSeeking by remember { mutableStateOf(false) }
@@ -199,6 +203,15 @@ fun PlayerControls(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            if (showSkipButtons) {
+                OutlinedButton(onClick = onSkipBack15) {
+                    Text("−15s", color = SpotifyWhite)
+                }
+                OutlinedButton(onClick = onSkipForward15) {
+                    Text("+15s", color = SpotifyWhite)
+                }
+            }
+
             IconButton(
                 onClick = onRadio,
                 modifier = Modifier.size(72.dp)

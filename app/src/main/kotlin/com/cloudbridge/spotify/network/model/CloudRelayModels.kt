@@ -9,5 +9,6 @@ data class CloudSessionPayload(
     @Json(name = "clientSecret") val clientSecret: String? = null,
     @Json(name = "refreshToken") val refreshToken: String,
     @Json(name = "profileName") val profileName: String,
-    @Json(name = "profileImageUrl") val profileImageUrl: String? = null
+    @Json(name = "profileImageUrl") val profileImageUrl: String? = null,
+    @Json(name = "targetProfileId") val targetProfileId: String? = null
 )

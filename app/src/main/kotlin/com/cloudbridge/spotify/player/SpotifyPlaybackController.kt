@@ -205,6 +205,12 @@ class SpotifyPlaybackController(
         }
     }
 
+    suspend fun addToQueue(uri: String): Boolean = withContext(Dispatchers.IO) {
+        return@withContext executeWithRetry("addToQueue") {
+            api.addToQueue(uri = uri, deviceId = it)
+        }
+    }
+
     // ── Private Helpers ──────────────────────────────────────────────
 
     /**

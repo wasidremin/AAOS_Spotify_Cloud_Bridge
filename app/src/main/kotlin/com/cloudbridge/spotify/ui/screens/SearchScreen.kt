@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.dp
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.components.AlbumArtTile
+import com.cloudbridge.spotify.ui.components.ContextMenuAction
 import com.cloudbridge.spotify.ui.theme.SpotifyGreen
 import com.cloudbridge.spotify.ui.theme.SpotifyLightGray
 import com.cloudbridge.spotify.ui.theme.SpotifyWhite
@@ -146,6 +147,24 @@ fun SearchScreen(
                     title = item.title,
                     subtitle = item.subtitle,
                     isPinned = item.uri in pinnedUris,
+                    contextActions = when (item.type) {
+                        "playlist" -> listOf(
+                            ContextMenuAction("Add to queue") { viewModel.addPlaylistToQueue(item.id) },
+                            ContextMenuAction(if (item.uri in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForSearchResult(item)
+                            }
+                        )
+                        "album" -> listOf(
+                            ContextMenuAction("Add to queue") { viewModel.addAlbumToQueue(item.id) },
+                            ContextMenuAction(if (item.uri in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForSearchResult(item)
+                            }
+                        )
+                        "track" -> listOf(
+                            ContextMenuAction("Add to queue") { viewModel.addTrackToQueue(item.uri) }
+                        )
+                        else -> emptyList()
+                    },
                     onClick = {
                         when (item.type) {
                             "playlist" -> {
@@ -172,10 +191,6 @@ fun SearchScreen(
                                 viewModel.playTrack(trackUri = item.uri)
                             }
                         }
-                    },
-                    onLongClick = when (item.type) {
-                        "album" -> ({ viewModel.togglePinForSearchResult(item) })
-                        else -> null
                     }
                 )
             }

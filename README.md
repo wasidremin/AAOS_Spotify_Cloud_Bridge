@@ -29,6 +29,8 @@ For in-car release testing, generate the signed Android App Bundle with `./gradl
 
 For Windows, the repo now includes an automated refresh-token helper at [scripts/refresh-spotify-token.ps1](scripts/refresh-spotify-token.ps1). Fill in [scripts/spotify-oauth.config.xml](scripts/spotify-oauth.config.xml), run the script, approve Spotify in the browser, and it will update [app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt](app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt).
 
+The GitHub Pages companion now requests both `playlist-read-private` and `playlist-read-collaborative`. After deploying updates to [docs/index.html](docs/index.html), use the new **Refresh Permissions** action in Settings to re-consent the active profile in place so the refreshed token includes the new playlist scope without creating a duplicate profile.
+
 ## Architecture
 
 ```
@@ -75,11 +77,11 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 |--------|-------------|
 | **Home** | LazyVerticalGrid with a time-of-day greeting, persistent Clean Swapper toggle, hydrated "Jump Back In", generated "Your Custom Mixes" tiles, library-derived suggested playlists, pinned favorites, and podcast cards with new-episode badges |
 | **Manage Pins** | Reorder and remove pinned playlists, albums, and podcasts surfaced on Home |
-| **Search** | Dedicated automotive search tab with large text field, 4-column results grid, and album pinning |
+| **Search** | Dedicated automotive search tab with large text field, 4-column results grid, and long-press actions for queueing albums/playlists/tracks or pinning results |
 | **Library** | Playlists / Albums / Artists / Podcasts tabs with local sort + filter controls, plus tab state preserved across back navigation |
 | **Add Profile** | Smart-TV-style QR onboarding screen with a 6-character session code, QR code, and cloud-relay completion polling |
-| **Now Playing** | Blurred background, hero album art, progress slider, controls, Start Radio action, explicit badge support, and chapter-safe audiobook metadata |
-| **Queue** | Swipe-to-dismiss queue management with higher drag threshold; supports tracks, podcast episodes, and audiobook chapters with unified artwork/text |
+| **Now Playing** | Blurred background, hero album art, larger explicit badge, live liked-song heart sync, ±15 second skip for spoken-word playback, Start Radio, and chapter-safe audiobook metadata |
+| **Queue** | Swipe-to-dismiss queue management with higher drag threshold; supports tracks, podcast episodes, and audiobook chapters, plus long-press queueing from Search, Library, playlists, albums, and podcast episodes |
 | **Playlist Detail** | Track list with larger tap targets, explicit badges, now-playing speaker indicator, and quick Start Radio actions |
 
 ## Automotive Layout Notes
@@ -99,16 +101,22 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 - Album tiles are forced square (`aspectRatio(1f)`) with `ContentScale.Crop` to avoid stretched artwork.
 - Album tiles include a `SpotifyCardSurface` fallback background so missing artwork still renders as a visible card.
 - Library and detail lists use larger touch targets (72dp and 64dp artwork rows) for safer in-car interaction.
-- Library Playlists, Albums, and Podcasts can each switch between large-tile grids and roomy list rows without losing long-press pinning.
+- Library Playlists, Albums, and Podcasts can each switch between large-tile grids and roomy list rows without losing long-press context actions.
+- Long-press on playlists and albums now opens a context menu with **Add to queue** plus **Pin/Unpin** actions; long-press on track and episode rows queues that specific item.
 - Library always refreshes playlists/albums/podcasts from Spotify when opened, while still seeding from cache first so newly added playlists appear without requiring an app reinstall.
 - Library Playlists always shows an official "Liked Songs" tile first, backed by `GET /v1/me/tracks`.
+- Playlist sync is now hardened against malformed Spotify playlist payloads by allowing nullable playlist IDs/names/URIs in the network model and rejecting bad records before they hit the cache.
 - Library tab selection persists via `SpotifyViewModel.libraryTab`, so returning from detail screens keeps context.
 - Library tabs now support in-memory filtering plus local sort modes (for example alphabetical, creator/publisher, and recently added) without hitting Spotify again.
 - Settings now shows all stored Spotify profiles and provides an **Add profile with QR code** entry point.
+- Settings now also includes a **Refresh Permissions** action that reuses the active profile's saved developer app credentials, launches a lighter Spotify re-consent flow on the phone, and updates that same Room profile row in place when the new refresh token comes back.
 - Settings now includes a **Home screen order** editor so users can rearrange sections like Jump Back In, Podcasts, and New Releases.
+- The left navigation rail now keeps **Settings** anchored at the bottom while **Now Playing** sits above it with the rest of the primary destinations.
+- The app now follows the car's day/night mode by switching between two dark palettes and applying a heavier Now Playing scrim at night to reduce glare.
 - Phase 1 multi-profile auth stores only the active profile ID in DataStore; each profile's Spotify credentials now live in Room as `user_profiles` rows.
 - The very first profile is now forced through QR onboarding before the rest of the app can be used.
 - QR onboarding generates a one-time cloud-relay session code, opens the GitHub Pages companion at https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/, polls for the relay payload, then switches the new profile active automatically.
+- Refresh-permissions QR sessions pass the active profile ID through the relay payload so re-consent swaps in the new refresh token while preserving the original profile identity.
 - The Add Profile relay now targets the Firebase Realtime Database endpoint `https://aaosspotiftycloudbridge-default-rtdb.firebaseio.com/`.
 - Upgrades from the older single-profile build migrate any legacy DataStore credentials into the new Room-backed profile store on startup so saved keys are preserved.
 - Daily Drive now leads with a podcast, follows with a shorter music block, then returns to podcast content sooner.
@@ -131,7 +139,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 ## Request Budget Audit
 
 - The heaviest request paths were audited before the lockout change.
-- `syncPlaybackState()` was previously making both `GET /v1/me/player` and `GET /v1/me/tracks/contains` on every poll; saved-track status is now refreshed only when the current track changes.
+- `syncPlaybackState()` no longer leaves podcast playback stale after transient null responses; spoken-word sessions retry once immediately, poll more frequently, and tolerate short background gaps before declaring playback out of sync.
+- Saved-track status is now force-refreshed when Now Playing opens and periodically while the same track remains active so the heart stays aligned with Liked Songs.
 - Home suggested-playlist loading previously forced a full playlist refresh even when playlists were already cached in memory; it now reuses loaded or cached playlists first.
 - Recently played hydration now uses loaded/cached playlist and album metadata before falling back to per-item hydration requests.
 - Podcast freshness checks remain a bounded hotspot because they intentionally inspect recent episodes per saved show, but concurrency is capped and the work is limited to a small per-show episode window.

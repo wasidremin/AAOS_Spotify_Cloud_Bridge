@@ -5,14 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Spotify Cloud Bridge Setup</title>
     <style>
-        body { background-color: #121212; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .container { background-color: #181818; padding: 40px; border-radius: 16px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        body { background-color: #121212; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+        .container { background-color: #181818; padding: 40px; border-radius: 16px; width: 100%; max-width: 450px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         h2 { color: #1DB954; margin-top: 0; }
         p { color: #B3B3B3; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
-        input { width: 100%; padding: 12px; margin-bottom: 16px; border-radius: 8px; border: 1px solid #333; background-color: #282828; color: white; box-sizing: border-box; }
-        button { background-color: #1DB954; color: black; border: none; padding: 14px; width: 100%; border-radius: 500px; font-weight: bold; font-size: 16px; cursor: pointer; transition: transform 0.1s; }
+        .instructions { text-align: left; background-color: #282828; padding: 20px; border-radius: 12px; margin-bottom: 24px; font-size: 13px; color: #B3B3B3; border: 1px solid #333; }
+        .instructions p.title { margin-top: 0; margin-bottom: 12px; color: #FFFFFF; font-weight: 600; font-size: 14px; }
+        .instructions ol { margin: 0; padding-left: 20px; }
+        .instructions li { margin-bottom: 10px; line-height: 1.4; }
+        .instructions li:last-child { margin-bottom: 0; }
+        .instructions a { color: #1DB954; text-decoration: none; font-weight: 500; }
+        .instructions a:hover { text-decoration: underline; }
+        .instructions code { background-color: #121212; padding: 3px 6px; border-radius: 4px; font-size: 11px; word-break: break-all; color: #1DB954; border: 1px solid #333; display: inline-block; margin-top: 4px; }
+        input { width: 100%; padding: 14px; margin-bottom: 16px; border-radius: 8px; border: 1px solid #333; background-color: #121212; color: white; box-sizing: border-box; font-size: 14px; transition: border-color 0.2s; }
+        input:focus { outline: none; border-color: #1DB954; }
+        button { background-color: #1DB954; color: black; border: none; padding: 14px; width: 100%; border-radius: 500px; font-weight: bold; font-size: 16px; cursor: pointer; transition: transform 0.1s, background-color 0.2s; }
+        button:hover { background-color: #1ed760; }
         button:active { transform: scale(0.98); }
-        .hidden { display: none; }
+        .hidden { display: none !important; }
         .spinner { border: 4px solid #333; border-top: 4px solid #1DB954; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -20,74 +30,131 @@
 <body>
 
 <div class="container" id="form-ui">
-    <h2>Connect to Cloud Bridge</h2>
-    <p>Enter your Spotify Developer App credentials to link your profile to the car.</p>
-    <input type="text" id="clientId" placeholder="Spotify Client ID" required>
-    <input type="password" id="clientSecret" placeholder="Spotify Client Secret" required>
-    <button onclick="startAuth()">Connect Spotify</button>
+    <h2 id="form-title">Connect to Cloud Bridge</h2>
+    <p id="form-copy">Link your Spotify account to your car's media system.</p>
+
+    <div class="instructions" id="instructions-box">
+        <p class="title" id="instructions-title">How to get your credentials:</p>
+        <ol id="instructions-list">
+            <li>Go to the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> and log in.</li>
+            <li>Click <strong>Create App</strong> (or open an existing one).</li>
+            <li>In the app Settings, ensure your <strong>Redirect URI</strong> is set exactly to:<br><code>https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/</code></li>
+            <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> below.</li>
+        </ol>
+    </div>
+
+    <input type="text" id="clientId" placeholder="Spotify Client ID" required autocomplete="off">
+    <input type="password" id="clientSecret" placeholder="Spotify Client Secret" required autocomplete="off">
+    <button id="connect-button" onclick="startAuth()">Connect Spotify</button>
 </div>
 
 <div class="container hidden" id="loading-ui">
-    <h2>Authenticating...</h2>
+    <h2 id="loading-title">Authenticating...</h2>
     <div class="spinner"></div>
     <p id="status-text">Securely linking your account.</p>
 </div>
 
 <div class="container hidden" id="success-ui">
     <h2>Success!</h2>
-    <p>Your profile has been sent to the car. You can now close this window.</p>
+    <p id="success-copy">Your profile has been sent to the car. You can now close this window and look at your car's screen.</p>
 </div>
 
 <script>
-    // --- IMPORTANT: REPLACE WITH YOUR FIREBASE DB URL ---
     const FIREBASE_DB_URL = "https://aaosspotiftycloudbridge-default-rtdb.firebaseio.com";
     const REDIRECT_URI = "https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/";
+    const SCOPES = "user-library-read user-library-modify user-read-playback-state user-modify-playback-state user-read-currently-playing user-read-recently-played user-top-read playlist-read-private playlist-read-collaborative";
 
     const urlParams = new URLSearchParams(window.location.search);
     const authCode = urlParams.get('code');
-    const sessionState = urlParams.get('state'); // We passed the session ID in the state
+    const sessionState = urlParams.get('state');
     const initialSession = urlParams.get('session');
+    const mode = urlParams.get('mode') === 'refresh' ? 'refresh' : 'add';
+    const presetClientId = urlParams.get('client_id') || '';
+    const presetClientSecret = urlParams.get('client_secret') || '';
+    const targetProfileId = urlParams.get('profile_id') || '';
+
+    configureUi();
 
     if (authCode && sessionState) {
-        // Step 2: Returning from Spotify. Exchange code for tokens.
         document.getElementById('form-ui').classList.add('hidden');
         document.getElementById('loading-ui').classList.remove('hidden');
         exchangeTokenAndSendToCar(authCode, sessionState);
     } else if (!initialSession) {
-        document.getElementById('form-ui').innerHTML = "<h2>Invalid Link</h2><p>Please scan the QR code on your car screen again.</p>";
+        document.getElementById('form-ui').innerHTML = "<h2>Invalid Link</h2><p>Please scan the QR code on your car screen again to start a new session.</p>";
+    } else if (mode === 'refresh' && presetClientId && presetClientSecret) {
+        document.getElementById('form-ui').classList.add('hidden');
+        document.getElementById('loading-ui').classList.remove('hidden');
+        document.getElementById('loading-title').innerText = "Redirecting to Spotify...";
+        document.getElementById('status-text').innerText = "Using your saved app credentials to refresh permissions.";
+        startAuth(true);
     }
 
-    function startAuth() {
+    function configureUi() {
+        const formTitle = document.getElementById('form-title');
+        const formCopy = document.getElementById('form-copy');
+        const connectButton = document.getElementById('connect-button');
+        const instructionsTitle = document.getElementById('instructions-title');
+        const instructionsList = document.getElementById('instructions-list');
+        const clientIdInput = document.getElementById('clientId');
+        const clientSecretInput = document.getElementById('clientSecret');
+
+        clientIdInput.value = presetClientId;
+        clientSecretInput.value = presetClientSecret;
+
+        if (mode !== 'refresh') {
+            return;
+        }
+
+        formTitle.innerText = 'Refresh Spotify Permissions';
+        formCopy.innerText = presetClientSecret
+            ? 'Your car already has this developer app saved. Approve Spotify again to refresh the permissions on the existing profile.'
+            : 'Approve Spotify again to refresh the permissions on the existing car profile. Your Client ID is pre-filled, but the Client Secret is still required for the token exchange.';
+        connectButton.innerText = 'Continue with Spotify';
+        instructionsTitle.innerText = 'What happens next:';
+        instructionsList.innerHTML = presetClientSecret
+            ? '<li>Your car already has the Spotify developer app linked for this profile.</li><li>You will be redirected straight to Spotify to approve the refreshed permission list.</li><li>When Spotify returns, the car updates the existing profile in place instead of adding a duplicate.</li>'
+            : '<li>Your Client ID is already filled in from the car profile.</li><li>Enter the matching Client Secret so the page can finish the Spotify token exchange.</li><li>After approval, the car updates the existing profile in place instead of adding a duplicate.</li>';
+    }
+
+    function startAuth(isAutomatic = false) {
         const clientId = document.getElementById('clientId').value.trim();
         const clientSecret = document.getElementById('clientSecret').value.trim();
-        if (!clientId || !clientSecret) return alert("Please enter both ID and Secret.");
+        if (!clientId || !clientSecret) {
+            if (!isAutomatic) {
+                alert('Please enter both your Client ID and Client Secret.');
+            }
+            return;
+        }
 
-        // Save credentials temporarily to survive the redirect
         sessionStorage.setItem('temp_client_id', clientId);
         sessionStorage.setItem('temp_client_secret', clientSecret);
+        sessionStorage.setItem('temp_mode', mode);
+        sessionStorage.setItem('temp_profile_id', targetProfileId);
 
-        const scopes = "user-library-read user-library-modify user-read-playback-state user-modify-playback-state user-read-currently-playing user-read-recently-played user-top-read playlist-read-private";
-        
-        // We pass the car's session code in the 'state' parameter so Spotify hands it right back to us
-        const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(scopes)}&state=${initialSession}`;
+        if (isAutomatic) {
+            document.getElementById('status-text').innerText = 'Opening Spotify approval...';
+        }
+
+        const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}&state=${initialSession}`;
         window.location.href = authUrl;
     }
 
     async function exchangeTokenAndSendToCar(code, sessionCode) {
         const clientId = sessionStorage.getItem('temp_client_id');
         const clientSecret = sessionStorage.getItem('temp_client_secret');
-        sessionStorage.clear(); // Clean up
+        const tempMode = sessionStorage.getItem('temp_mode') || 'add';
+        const tempProfileId = sessionStorage.getItem('temp_profile_id') || '';
+        sessionStorage.clear();
 
         if (!clientId || !clientSecret) {
-            document.getElementById('status-text').innerText = "Session lost. Please scan the QR code again.";
+            document.getElementById('status-text').innerText = 'Session lost. Please scan the QR code on your car again.';
             return;
         }
 
         try {
-            document.getElementById('status-text').innerText = "Generating tokens...";
+            document.getElementById('status-text').innerText = 'Generating tokens...';
             const authHeader = btoa(`${clientId}:${clientSecret}`);
-            
-            // We use a public CORS proxy because Spotify blocks token requests directly from browsers
+
             const tokenResponse = await fetch(`https://corsproxy.io/?https://accounts.spotify.com/api/token`, {
                 method: 'POST',
                 headers: {
@@ -98,24 +165,26 @@
             });
 
             const tokenData = await tokenResponse.json();
-            if (!tokenData.refresh_token) throw new Error("Failed to get refresh token");
+            if (!tokenData.refresh_token) {
+                throw new Error('Failed to get refresh token. Check if your Client Secret is correct.');
+            }
 
-            document.getElementById('status-text').innerText = "Fetching your profile...";
-            const profileResponse = await fetch(`https://api.spotify.com/v1/me`, {
+            document.getElementById('status-text').innerText = 'Fetching your profile...';
+            const profileResponse = await fetch('https://api.spotify.com/v1/me', {
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
             });
             const profileData = await profileResponse.json();
 
-            document.getElementById('status-text').innerText = "Sending to car...";
+            document.getElementById('status-text').innerText = 'Sending to car...';
             const payload = {
                 clientId: clientId,
                 clientSecret: clientSecret,
                 refreshToken: tokenData.refresh_token,
-                profileName: profileData.display_name || "Spotify User",
-                profileImageUrl: (profileData.images && profileData.images.length > 0) ? profileData.images[0].url : null
+                profileName: profileData.display_name || 'Spotify User',
+                profileImageUrl: (profileData.images && profileData.images.length > 0) ? profileData.images[0].url : null,
+                targetProfileId: tempMode === 'refresh' && tempProfileId ? tempProfileId : null
             };
 
-            // Drop the payload into Firebase where the car is waiting for it
             await fetch(`${FIREBASE_DB_URL}/sessions/${sessionCode}.json`, {
                 method: 'PUT',
                 body: JSON.stringify(payload)
@@ -123,9 +192,11 @@
 
             document.getElementById('loading-ui').classList.add('hidden');
             document.getElementById('success-ui').classList.remove('hidden');
-
+            document.getElementById('success-copy').innerText = tempMode === 'refresh'
+                ? 'Your permissions were refreshed on the car. You can now close this window and look at your car\'s screen.'
+                : 'Your profile has been sent to the car. You can now close this window and look at your car\'s screen.';
         } catch (e) {
-            document.getElementById('status-text').innerText = "Error: " + e.message;
+            document.getElementById('status-text').innerText = 'Error: ' + e.message;
         }
     }
 </script>

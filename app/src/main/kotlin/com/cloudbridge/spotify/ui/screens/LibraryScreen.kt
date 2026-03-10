@@ -34,6 +34,7 @@ import com.cloudbridge.spotify.network.model.SpotifyPlaylist
 import com.cloudbridge.spotify.network.model.SpotifyShow
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.components.AlbumArtTile
+import com.cloudbridge.spotify.ui.components.ContextMenuAction
 import com.cloudbridge.spotify.ui.theme.*
 
 private enum class PlaylistSortOption(val label: String) {
@@ -215,18 +216,18 @@ private fun PlaylistList(
         playlists
             .filter { playlist ->
                 query.isBlank() ||
-                    playlist.name.contains(query, ignoreCase = true) ||
+                    playlist.name.orEmpty().contains(query, ignoreCase = true) ||
                     (playlist.owner?.displayName?.contains(query, ignoreCase = true) == true) ||
                     (playlist.description?.contains(query, ignoreCase = true) == true)
             }
             .let { matches ->
                 when (sortOption) {
                     PlaylistSortOption.RecentlyAdded -> matches
-                    PlaylistSortOption.Alphabetical -> matches.sortedBy { it.name.lowercase() }
+                    PlaylistSortOption.Alphabetical -> matches.sortedBy { it.name.orEmpty().lowercase() }
                     PlaylistSortOption.Creator -> matches.sortedWith(
                         compareBy<SpotifyPlaylist>(
                             { (it.owner?.displayName ?: "You").lowercase() },
-                            { it.name.lowercase() }
+                            { it.name.orEmpty().lowercase() }
                         )
                     )
                 }
@@ -272,6 +273,9 @@ private fun PlaylistList(
                             imageUrl = "https://misc.scdn.co/liked-songs/liked-songs-300.png",
                             title = "Liked Songs",
                             subtitle = "Your saved tracks",
+                            contextActions = listOf(
+                                ContextMenuAction("Add to queue") { viewModel.addLikedSongsToQueue() }
+                            ),
                             onClick = {
                                 viewModel.navigateTo(
                                     SpotifyViewModel.Screen.PlaylistDetail(
@@ -285,26 +289,33 @@ private fun PlaylistList(
                     }
                 }
 
-                items(filteredPlaylists, key = { it.id }) { playlist ->
+                items(filteredPlaylists, key = { it.id ?: it.uri ?: it.name ?: it.hashCode() }) { playlist ->
                     AlbumArtTile(
                         imageUrl = viewModel.bestArtwork(playlist.images),
-                        title = playlist.name,
+                        title = playlist.name ?: "Unknown Playlist",
                         subtitle = "${playlist.tracks?.total ?: 0} tracks",
-                        isPinned = playlist.uri in pinnedUris,
+                        isPinned = (playlist.uri ?: "") in pinnedUris,
+                        contextActions = listOf(
+                            ContextMenuAction("Add to queue") { playlist.id?.let(viewModel::addPlaylistToQueue) },
+                            ContextMenuAction(if ((playlist.uri ?: "") in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForPlaylist(playlist)
+                            }
+                        ),
                         onClick = {
+                            val playlistUri = playlist.uri ?: return@AlbumArtTile
                             if (playInstantly) {
-                                viewModel.playContext(playlist.uri)
+                                viewModel.playContext(playlistUri)
                             } else {
+                                val playlistId = playlist.id ?: return@AlbumArtTile
                                 viewModel.navigateTo(
                                     SpotifyViewModel.Screen.PlaylistDetail(
-                                        id = playlist.id,
-                                        name = playlist.name,
-                                        uri = playlist.uri
+                                        id = playlistId,
+                                        name = playlist.name ?: "Unknown Playlist",
+                                        uri = playlistUri
                                     )
                                 )
                             }
-                        },
-                        onLongClick = { viewModel.togglePinForPlaylist(playlist) }
+                        }
                     )
                 }
             }
@@ -323,6 +334,9 @@ private fun PlaylistList(
                             imageUrl = "https://misc.scdn.co/liked-songs/liked-songs-300.png",
                             title = "Liked Songs",
                             subtitle = "Your saved tracks",
+                            contextActions = listOf(
+                                ContextMenuAction("Add to queue") { viewModel.addLikedSongsToQueue() }
+                            ),
                             onClick = {
                                 viewModel.navigateTo(
                                     SpotifyViewModel.Screen.PlaylistDetail(
@@ -336,26 +350,33 @@ private fun PlaylistList(
                     }
                 }
 
-                items(filteredPlaylists, key = { it.id }) { playlist ->
+                items(filteredPlaylists, key = { it.id ?: it.uri ?: it.name ?: it.hashCode() }) { playlist ->
                     LibraryRow(
                         imageUrl = viewModel.bestArtwork(playlist.images),
-                        title = playlist.name,
+                        title = playlist.name ?: "Unknown Playlist",
                         subtitle = "${playlist.tracks?.total ?: 0} tracks",
-                        isPinned = playlist.uri in pinnedUris,
+                        isPinned = (playlist.uri ?: "") in pinnedUris,
+                        contextActions = listOf(
+                            ContextMenuAction("Add to queue") { playlist.id?.let(viewModel::addPlaylistToQueue) },
+                            ContextMenuAction(if ((playlist.uri ?: "") in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForPlaylist(playlist)
+                            }
+                        ),
                         onClick = {
+                            val playlistUri = playlist.uri ?: return@LibraryRow
                             if (playInstantly) {
-                                viewModel.playContext(playlist.uri)
+                                viewModel.playContext(playlistUri)
                             } else {
+                                val playlistId = playlist.id ?: return@LibraryRow
                                 viewModel.navigateTo(
                                     SpotifyViewModel.Screen.PlaylistDetail(
-                                        id = playlist.id,
-                                        name = playlist.name,
-                                        uri = playlist.uri
+                                        id = playlistId,
+                                        name = playlist.name ?: "Unknown Playlist",
+                                        uri = playlistUri
                                     )
                                 )
                             }
-                        },
-                        onLongClick = { viewModel.togglePinForPlaylist(playlist) }
+                        }
                     )
                 }
             }
@@ -439,6 +460,14 @@ private fun AlbumList(
                         title = album.name,
                         subtitle = album.artists?.joinToString(", ") { it.name } ?: "",
                         isPinned = (album.uri ?: "") in pinnedUris,
+                        contextActions = listOfNotNull(
+                            album.id?.let { albumId ->
+                                ContextMenuAction("Add to queue") { viewModel.addAlbumToQueue(albumId) }
+                            },
+                            ContextMenuAction(if ((album.uri ?: "") in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForAlbum(album)
+                            }
+                        ),
                         onClick = {
                             viewModel.navigateTo(
                                 SpotifyViewModel.Screen.AlbumDetail(
@@ -447,8 +476,7 @@ private fun AlbumList(
                                     uri = album.uri
                                 )
                             )
-                        },
-                        onLongClick = { viewModel.togglePinForAlbum(album) }
+                        }
                     )
                 }
             }
@@ -466,6 +494,14 @@ private fun AlbumList(
                         title = album.name,
                         subtitle = album.artists?.joinToString(", ") { it.name } ?: "",
                         isPinned = (album.uri ?: "") in pinnedUris,
+                        contextActions = listOfNotNull(
+                            album.id?.let { albumId ->
+                                ContextMenuAction("Add to queue") { viewModel.addAlbumToQueue(albumId) }
+                            },
+                            ContextMenuAction(if ((album.uri ?: "") in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForAlbum(album)
+                            }
+                        ),
                         onClick = {
                             viewModel.navigateTo(
                                 SpotifyViewModel.Screen.AlbumDetail(
@@ -474,8 +510,7 @@ private fun AlbumList(
                                     uri = album.uri
                                 )
                             )
-                        },
-                        onLongClick = { viewModel.togglePinForAlbum(album) }
+                        }
                     )
                 }
             }
@@ -685,8 +720,12 @@ private fun ShowList(
                         title = show.name,
                         subtitle = show.publisher ?: "Podcast",
                         isPinned = show.uri in pinnedUris,
-                        onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.PodcastDetail(show.id, show.name, show.uri)) },
-                        onLongClick = { viewModel.togglePinForShow(show) }
+                        contextActions = listOf(
+                            ContextMenuAction(if (show.uri in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForShow(show)
+                            }
+                        ),
+                        onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.PodcastDetail(show.id, show.name, show.uri)) }
                     )
                 }
             }
@@ -704,8 +743,12 @@ private fun ShowList(
                         title = show.name,
                         subtitle = show.publisher ?: "Podcast",
                         isPinned = show.uri in pinnedUris,
-                        onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.PodcastDetail(show.id, show.name, show.uri)) },
-                        onLongClick = { viewModel.togglePinForShow(show) }
+                        contextActions = listOf(
+                            ContextMenuAction(if (show.uri in pinnedUris) "Unpin" else "Pin to Home") {
+                                viewModel.togglePinForShow(show)
+                            }
+                        ),
+                        onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.PodcastDetail(show.id, show.name, show.uri)) }
                     )
                 }
             }
@@ -795,12 +838,23 @@ private fun LibraryRow(
     subtitle: String,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    contextActions: List<ContextMenuAction> = emptyList(),
     isPinned: Boolean = false
 ) {
+    var menuExpanded by remember(title, subtitle, contextActions.size) { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    when {
+                        contextActions.isNotEmpty() -> menuExpanded = true
+                        onLongClick != null -> onLongClick()
+                    }
+                }
+            )
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -843,6 +897,21 @@ private fun LibraryRow(
                     .padding(start = 12.dp)
                     .size(24.dp)
             )
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false }
+        ) {
+            contextActions.forEach { action ->
+                DropdownMenuItem(
+                    text = { Text(action.label) },
+                    onClick = {
+                        menuExpanded = false
+                        action.onClick()
+                    }
+                )
+            }
         }
     }
 }

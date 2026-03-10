@@ -160,6 +160,11 @@ class SpotifyViewModel(
     companion object {
         private const val TAG = "SpotifyViewModel"
         private const val METADATA_POLL_MS = 3000L
+        private const val PODCAST_METADATA_POLL_MS = 2000L
+        private const val PODCAST_NULL_TOLERANCE_MS = 20_000L
+        private const val PODCAST_RETRY_DELAY_MS = 750L
+        private const val SAVED_STATUS_REFRESH_MS = 15_000L
+        private const val MAX_QUEUE_BATCH = 100
         private val PINNABLE_TYPES = setOf("playlist", "album", "show")
         const val CUSTOM_MIX_DAILY_DRIVE = "daily_drive"
         private const val CUSTOM_MIX_80S = "mix_80s"
@@ -208,10 +213,10 @@ class SpotifyViewModel(
         data object Queue : Screen()
         data object Settings : Screen()
         data object HomeLayoutSettings : Screen()
-        data object AddProfile : Screen()
+        data class AddProfile(val refreshProfileId: String? = null) : Screen()
     }
 
-    private val _currentScreen = MutableStateFlow<Screen>(if (hasProfilesOnDisk) Screen.Home else Screen.AddProfile)
+    private val _currentScreen = MutableStateFlow<Screen>(if (hasProfilesOnDisk) Screen.Home else Screen.AddProfile())
     val currentScreen: StateFlow<Screen> = _currentScreen
 
     private val backStack = mutableListOf<Screen>()
@@ -381,6 +386,8 @@ class SpotifyViewModel(
 
     private var hasDismissedReauthThisSession = false
     private var lastSavedStatusTrackId: String? = null
+    private var lastSavedStatusCheckedAtMs: Long = 0L
+    private var lastSuccessfulPlaybackSyncAtMs: Long = 0L
 
     // ── Metadata Sync ────────────────────────────────────────────────
 
@@ -457,7 +464,7 @@ class SpotifyViewModel(
         _showNowPlaying.value = false
         _playbackState.value = null
         _isTrackSaved.value = false
-        _currentScreen.value = Screen.AddProfile
+        _currentScreen.value = Screen.AddProfile()
     }
 
     private suspend fun refreshForActiveProfile(clearProfileData: Boolean) {
@@ -501,7 +508,7 @@ class SpotifyViewModel(
     fun navigateTo(screen: Screen) {
         if (shouldForceProfileSetup() && screen !is Screen.AddProfile) {
             backStack.clear()
-            _currentScreen.value = Screen.AddProfile
+            _currentScreen.value = Screen.AddProfile()
             return
         }
         if (_currentScreen.value != screen) {
@@ -522,7 +529,7 @@ class SpotifyViewModel(
         if (shouldForceProfileSetup() && screen !is Screen.AddProfile) {
             backStack.clear()
             _showNowPlaying.value = false
-            _currentScreen.value = Screen.AddProfile
+            _currentScreen.value = Screen.AddProfile()
             return
         }
         _showNowPlaying.value = false // Force overlay to close
@@ -554,6 +561,8 @@ class SpotifyViewModel(
 
     fun openNowPlaying() {
         _showNowPlaying.value = true
+        lastSavedStatusTrackId = null
+        lastSavedStatusCheckedAtMs = 0L
         refreshPlaybackStateNow()
     }
     fun closeNowPlaying() { _showNowPlaying.value = false }
@@ -569,7 +578,7 @@ class SpotifyViewModel(
         if (shouldForceProfileSetup()) {
             _showNowPlaying.value = false
             backStack.clear()
-            _currentScreen.value = Screen.AddProfile
+            _currentScreen.value = Screen.AddProfile()
             return
         }
         if (_showNowPlaying.value) {
@@ -740,11 +749,13 @@ class SpotifyViewModel(
 
             val playlists = response.playlists?.items
                 ?.filterNotNull()
-                ?.map {
+                ?.mapNotNull {
+                    val id = it.id ?: return@mapNotNull null
+                    val uri = it.uri ?: return@mapNotNull null
                     SearchResultItem(
-                        id = it.id,
-                        uri = it.uri,
-                        title = it.name,
+                        id = id,
+                        uri = uri,
+                        title = it.name ?: "Unknown Playlist",
                         subtitle = "Playlist",
                         imageUrl = bestArtwork(it.images),
                         type = "playlist"
@@ -840,10 +851,12 @@ class SpotifyViewModel(
                         "playlist" -> {
                             try {
                                 val playlist = playlistById[id] ?: api.getPlaylist(id)
+                                val playlistId = playlist.id ?: return@async null
+                                val playlistUri = playlist.uri ?: return@async null
                                 RecentContextItem(
-                                    id = playlist.id,
-                                    uri = playlist.uri,
-                                    title = playlist.name,
+                                    id = playlistId,
+                                    uri = playlistUri,
+                                    title = playlist.name ?: "Unknown Playlist",
                                     subtitle = "Playlist",
                                     imageUrl = bestArtwork(playlist.images),
                                     type = type
@@ -921,14 +934,17 @@ class SpotifyViewModel(
             }
         }
 
-        val candidates = allPlaylists.filterNot { it.uri in excludedUris }
+        val candidates = allPlaylists.filterNot { playlist ->
+            val uri = playlist.uri ?: return@filterNot true
+            uri in excludedUris
+        }
 
         val curated = candidates
             .sortedWith(
                 compareByDescending<SpotifyPlaylist> { !it.description.isNullOrBlank() }
                     .thenByDescending { it.images?.isNotEmpty() == true }
                     .thenByDescending { it.tracks?.total ?: 0 }
-                    .thenBy { it.name.lowercase() }
+                    .thenBy { it.name.orEmpty().lowercase() }
             )
             .take(limit)
 
@@ -936,7 +952,7 @@ class SpotifyViewModel(
             curated
         } else {
             (curated + allPlaylists.filterNot { playlist -> curated.any { it.uri == playlist.uri } })
-                .distinctBy { it.uri }
+                .distinctBy { it.uri ?: it.id ?: it.name ?: "playlist-${it.hashCode()}" }
                 .take(limit)
         }
     }
@@ -1378,6 +1394,18 @@ class SpotifyViewModel(
         }
     }
 
+    fun skipBack15Seconds() {
+        val currentProgress = _playbackState.value?.progressMs ?: return
+        seekTo((currentProgress - 15_000L).coerceAtLeast(0L))
+    }
+
+    fun skipForward15Seconds() {
+        val playback = _playbackState.value ?: return
+        val duration = playback.item?.durationMs ?: return
+        val currentProgress = playback.progressMs ?: 0L
+        seekTo((currentProgress + 15_000L).coerceAtMost(duration))
+    }
+
     fun seekTo(positionMs: Long) {
         viewModelScope.launch {
             playbackController.seek(positionMs)
@@ -1417,9 +1445,44 @@ class SpotifyViewModel(
                     api.saveTracks(ids = trackId)
                     _isTrackSaved.value = true
                 }
+                lastSavedStatusTrackId = null
+                lastSavedStatusCheckedAtMs = 0L
             } catch (e: Exception) {
                 Log.e(TAG, "Toggle save failed: ${e.message}")
             }
+        }
+    }
+
+    fun addTrackToQueue(trackUri: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            enqueueUris(listOf(resolveTrackUriForPlayback(trackUri)))
+        }
+    }
+
+    fun addEpisodeToQueue(episodeUri: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            enqueueUris(listOf(episodeUri))
+        }
+    }
+
+    fun addPlaylistToQueue(playlistId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val tracks = fetchPlaylistTracks(playlistId)
+            enqueueUris(resolveTrackUrisForPlayback(tracks))
+        }
+    }
+
+    fun addAlbumToQueue(albumId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val tracks = fetchAlbumTracks(albumId)
+            enqueueUris(resolveTrackUrisForPlayback(tracks))
+        }
+    }
+
+    fun addLikedSongsToQueue() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val tracks = libraryRepository.getSavedTracks(maxTracks = MAX_QUEUE_BATCH)
+            enqueueUris(resolveTrackUrisForPlayback(tracks))
         }
     }
 
@@ -1566,8 +1629,14 @@ class SpotifyViewModel(
                     syncPlaybackState()
                 }
 
+                val currentItem = _playbackState.value?.item
                 val isPlaying = _playbackState.value?.isPlaying == true
-                val delayTime = if (isPlaying) METADATA_POLL_MS else 4000L
+                val isPodcast = currentItem?.type == "episode" || currentItem?.type == "chapter"
+                val delayTime = when {
+                    isPlaying && isPodcast -> PODCAST_METADATA_POLL_MS
+                    isPlaying -> METADATA_POLL_MS
+                    else -> 4000L
+                }
                 delay(delayTime)
             }
         }
@@ -1587,12 +1656,21 @@ class SpotifyViewModel(
      */
     private suspend fun syncPlaybackState() {
         try {
-            val previousItemUri = _playbackState.value?.item?.uri
-            val playback = playbackController.getCurrentPlayback()
+            val previousPlayback = _playbackState.value
+            val previousItemUri = previousPlayback?.item?.uri
+            val previousWasPodcast = previousPlayback?.item?.type == "episode" || previousPlayback?.item?.type == "chapter"
+            var playback = playbackController.getCurrentPlayback()
+
+            if (playback == null && previousWasPodcast && previousPlayback?.isPlaying == true) {
+                delay(PODCAST_RETRY_DELAY_MS)
+                playback = playbackController.getCurrentPlayback()
+            }
+
             if (playback != null) {
                 _isOffline.value = false
                 _deviceNotFoundError.value = false // Auto-clear error when device is detected
                 _playbackState.value = playback
+                lastSuccessfulPlaybackSyncAtMs = System.currentTimeMillis()
                 val currentItemUri = playback.item?.uri
                 val playbackItemChanged = currentItemUri != previousItemUri
 
@@ -1600,17 +1678,34 @@ class SpotifyViewModel(
                     syncQueueState(currentItemUri)
                 }
 
-                // Check if current track is saved
-                playback.item?.id?.let { trackId ->
-                    if (trackId != lastSavedStatusTrackId && playback.item?.type == "track") {
-                        lastSavedStatusTrackId = trackId
-                        try {
-                            val savedList = api.checkSavedTracks(ids = trackId)
-                            _isTrackSaved.value = savedList.firstOrNull() ?: false
-                        } catch (_: Exception) { /* non-critical */ }
+                if (playback.item?.type == "track") {
+                    playback.item.id?.let { trackId ->
+                        refreshSavedTrackStatus(
+                            trackId = trackId,
+                            force = playbackItemChanged || _showNowPlaying.value
+                        )
                     }
+                } else {
+                    _isTrackSaved.value = false
+                    lastSavedStatusTrackId = null
+                    lastSavedStatusCheckedAtMs = 0L
                 }
             } else {
+                val withinPodcastTolerance = previousWasPodcast &&
+                    previousPlayback?.isPlaying == true &&
+                    (System.currentTimeMillis() - lastSuccessfulPlaybackSyncAtMs) < PODCAST_NULL_TOLERANCE_MS
+
+                if (withinPodcastTolerance) {
+                    _playbackState.update { current ->
+                        val currentProgress = current?.progressMs ?: 0L
+                        current?.copy(
+                            progressMs = (currentProgress + PODCAST_METADATA_POLL_MS)
+                                .coerceAtMost(current.item?.durationMs ?: (currentProgress + PODCAST_METADATA_POLL_MS))
+                        )
+                    }
+                    return
+                }
+
                 _playbackState.update { it?.copy(isPlaying = false) }
                 if (_currentScreen.value is Screen.Queue) {
                     syncQueueState()
@@ -1956,8 +2051,65 @@ class SpotifyViewModel(
         return uris.isNotEmpty() && playbackController.play(uris = uris)
     }
 
+    private suspend fun enqueueUris(uris: List<String>) {
+        val distinctUris = uris.filter { it.isNotBlank() }.distinct().take(MAX_QUEUE_BATCH)
+        if (distinctUris.isEmpty()) return
+
+        var allSucceeded = true
+        distinctUris.forEach { uri ->
+            val success = playbackController.addToQueue(uri)
+            if (!success) allSucceeded = false
+        }
+
+        _deviceNotFoundError.value = !allSucceeded
+        delay(250)
+        syncQueueState()
+    }
+
+    private suspend fun fetchPlaylistTracks(playlistId: String): List<SpotifyTrack> {
+        if (playlistId == "liked-songs") {
+            return libraryRepository.getSavedTracks(maxTracks = MAX_QUEUE_BATCH)
+        }
+
+        val tracks = mutableListOf<SpotifyTrack>()
+        var offset = 0
+        do {
+            val page = api.getPlaylistTracks(playlistId, limit = 50, offset = offset)
+            tracks += page.items.filterNotNull().mapNotNull { it.track }
+            offset += 50
+        } while (page.next != null && offset < page.total && tracks.size < MAX_QUEUE_BATCH)
+        return tracks.take(MAX_QUEUE_BATCH)
+    }
+
+    private suspend fun fetchAlbumTracks(albumId: String): List<SpotifyTrack> {
+        val tracks = mutableListOf<SpotifyTrack>()
+        var offset = 0
+        do {
+            val page = api.getAlbumTracks(albumId, limit = 50, offset = offset)
+            tracks += page.items.filterNotNull()
+            offset += 50
+        } while (page.next != null && offset < page.total && tracks.size < MAX_QUEUE_BATCH)
+        return tracks.take(MAX_QUEUE_BATCH)
+    }
+
     private suspend fun resolveTrackUrisForPlayback(tracks: List<SpotifyTrack>): List<String> =
         tracks.take(100).map { libraryRepository.resolvePlaybackUri(it, _explicitFilterEnabled.value) }
+
+    private suspend fun refreshSavedTrackStatus(trackId: String, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val recentlyChecked = trackId == lastSavedStatusTrackId &&
+            (now - lastSavedStatusCheckedAtMs) < SAVED_STATUS_REFRESH_MS
+        if (!force && recentlyChecked) return
+
+        lastSavedStatusTrackId = trackId
+        lastSavedStatusCheckedAtMs = now
+        try {
+            val savedList = api.checkSavedTracks(ids = trackId)
+            _isTrackSaved.value = savedList.firstOrNull() ?: false
+        } catch (_: Exception) {
+            // Non-critical UI sync.
+        }
+    }
 
     private suspend fun resolveUrisForPlayback(uris: List<String>): List<String> =
         uris.take(100).map { resolveTrackUriForPlayback(it) }
@@ -2014,9 +2166,10 @@ class SpotifyViewModel(
     }
 
     fun togglePinForPlaylist(playlist: SpotifyPlaylist) {
+        if (playlist.id == null || playlist.uri == null) return
         togglePin(
             id = playlist.id,
-            name = playlist.name,
+            name = playlist.name ?: "Unknown Playlist",
             uri = playlist.uri,
             subtitle = "${playlist.tracks?.total ?: 0} tracks",
             imageUrl = bestArtwork(playlist.images),

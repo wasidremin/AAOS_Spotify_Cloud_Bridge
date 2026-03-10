@@ -141,8 +141,8 @@ private enum class NavItem(val label: String, val icon: ImageVector) {
     Search("Search", Icons.Filled.Search),
     Library("Library", Icons.Filled.LibraryMusic),
     Queue("Queue", Icons.AutoMirrored.Filled.QueueMusic),
-    Settings("Settings", Icons.Filled.Settings),
-    NowPlaying("Playing", Icons.Filled.PlayCircle) // <-- ADD THIS
+    NowPlaying("Playing", Icons.Filled.PlayCircle),
+    Settings("Settings", Icons.Filled.Settings)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -195,7 +195,15 @@ private fun CloudBridgeApp(
             ) {
                 Spacer(Modifier.height(12.dp))
 
-                NavItem.entries.forEach { item ->
+                val primaryNavItems = listOf(
+                    NavItem.Home,
+                    NavItem.Search,
+                    NavItem.Library,
+                    NavItem.Queue,
+                    NavItem.NowPlaying
+                )
+
+                primaryNavItems.forEach { item ->
                     val selected = when (item) {
                         NavItem.Home -> currentScreen is SpotifyViewModel.Screen.Home
                         NavItem.Search -> currentScreen is SpotifyViewModel.Screen.Search
@@ -208,7 +216,7 @@ private fun CloudBridgeApp(
                         NavItem.Settings -> currentScreen is SpotifyViewModel.Screen.Settings ||
                             currentScreen is SpotifyViewModel.Screen.HomeLayoutSettings ||
                                 currentScreen is SpotifyViewModel.Screen.AddProfile
-                        NavItem.NowPlaying -> showNowPlaying // <-- ADD THIS
+                        NavItem.NowPlaying -> showNowPlaying
                     }
 
                     NavigationRailItem(
@@ -222,7 +230,7 @@ private fun CloudBridgeApp(
                                 NavItem.Library -> viewModel.navigateTopLevel(SpotifyViewModel.Screen.Library)
                                 NavItem.Queue -> viewModel.navigateTopLevel(SpotifyViewModel.Screen.Queue)
                                 NavItem.Settings -> viewModel.navigateTopLevel(SpotifyViewModel.Screen.Settings)
-                                NavItem.NowPlaying -> viewModel.openNowPlaying() // <-- ADD THIS
+                                NavItem.NowPlaying -> viewModel.openNowPlaying()
                             }
                         },
                         icon = { Icon(item.icon, contentDescription = item.label, modifier = Modifier.size(48.dp)) },
@@ -236,6 +244,29 @@ private fun CloudBridgeApp(
                         )
                     )
                 }
+
+                Spacer(Modifier.weight(1f))
+
+                val settingsSelected = currentScreen is SpotifyViewModel.Screen.Settings ||
+                    currentScreen is SpotifyViewModel.Screen.HomeLayoutSettings ||
+                    currentScreen is SpotifyViewModel.Screen.AddProfile
+
+                NavigationRailItem(
+                    selected = settingsSelected,
+                    enabled = true,
+                    onClick = { viewModel.navigateTopLevel(SpotifyViewModel.Screen.Settings) },
+                    icon = { Icon(NavItem.Settings.icon, contentDescription = NavItem.Settings.label, modifier = Modifier.size(48.dp)) },
+                    label = { Text(NavItem.Settings.label, style = MaterialTheme.typography.labelLarge.copy(fontSize = 18.sp)) },
+                    colors = NavigationRailItemDefaults.colors(
+                        selectedIconColor = SpotifyGreen,
+                        selectedTextColor = SpotifyGreen,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        indicatorColor = SpotifyGreen.copy(alpha = 0.12f)
+                    )
+                )
+
+                Spacer(Modifier.height(12.dp))
             }
 
             // ── Content Area (Scaffold + Now Playing overlay) ─────────
@@ -285,6 +316,7 @@ private fun CloudBridgeApp(
                             is SpotifyViewModel.Screen.HomeLayoutSettings -> HomeLayoutSettingsScreen(viewModel, innerPadding)
                             is SpotifyViewModel.Screen.AddProfile -> AddProfileScreen(
                                 viewModel = addProfileViewModel,
+                                refreshProfileId = screen.refreshProfileId,
                                 onBack = { if (hasProfiles) viewModel.navigateBack() },
                                 onCompleted = {
                                     viewModel.onProfileAdded()

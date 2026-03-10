@@ -366,13 +366,13 @@ private fun LazyGridScope.addSuggestedSection(
     }
     items(
         items = featuredPlaylists.take(12),
-        key = { "feat-${it.id}" }
+        key = { "feat-${it.id ?: it.uri ?: it.name ?: it.hashCode()}" }
     ) { playlist ->
         PlaylistTile(
             playlist = playlist,
             viewModel = viewModel,
             playInstantly = playInstantly,
-            isPinned = playlist.uri in pinnedUris
+            isPinned = (playlist.uri ?: "") in pinnedUris
         )
     }
 }
@@ -470,18 +470,20 @@ private fun PlaylistTile(
 ) {
     AlbumArtTile(
         imageUrl = viewModel.bestArtwork(playlist.images),
-        title = playlist.name,
+        title = playlist.name ?: "Unknown Playlist",
         subtitle = "${playlist.tracks?.total ?: 0} tracks",
         isPinned = isPinned,
         onClick = {
+            val playlistUri = playlist.uri ?: return@AlbumArtTile
             if (playInstantly) {
-                viewModel.playContext(playlist.uri)
+                viewModel.playContext(playlistUri)
             } else {
+                val playlistId = playlist.id ?: return@AlbumArtTile
                 viewModel.navigateTo(
                     SpotifyViewModel.Screen.PlaylistDetail(
-                        id = playlist.id,
-                        name = playlist.name,
-                        uri = playlist.uri
+                        id = playlistId,
+                        name = playlist.name ?: "Unknown Playlist",
+                        uri = playlistUri
                     )
                 )
             }

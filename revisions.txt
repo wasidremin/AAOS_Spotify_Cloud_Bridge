@@ -1,4 +1,91 @@
 ═══════════════════════════════════════════════════════════════
+ R5.9  —  2026-03-10
+═══════════════════════════════════════════════════════════════
+ Summary: Added in-place Spotify permission refresh and merged the updated companion page
+
+ Changes:
+   • Added a Settings-screen **Refresh Permissions** action that opens the QR flow for the active profile instead of forcing a duplicate profile add
+   • Extended the Add Profile session flow so refresh sessions carry the target profile ID and update the existing Room `user_profiles` row in place when the new token arrives
+   • Merged the latest GitHub Pages setup-page layout/instructions while adding an automatic re-consent path that reuses stored client credentials and requests `playlist-read-collaborative`
+   • Fixed Kotlin build regressions surfaced by the fresh compile, including nullable playback math and playlist search hydration
+
+ Files Modified:
+   • README.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/model/CloudRelayModels.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/AddProfileViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/AddProfileScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/PlaylistDetailScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/PodcastDetailScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SettingsScreen.kt
+   • docs/index.html
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.8  —  2026-03-10
+═══════════════════════════════════════════════════════════════
+ Summary: Hardened playlist sync against malformed Spotify data and missing scope issues
+
+ Changes:
+   • Relaxed the playlist Moshi model so null `id`, `name`, `uri`, and track-count payloads no longer abort the full playlist refresh
+   • Updated playlist cache writes and UI entry points to skip malformed playlist rows and fall back to "Unknown Playlist" labels when needed
+   • Added `playlist-read-collaborative` to the QR onboarding companion scopes so collaborative playlists can be returned by Spotify
+   • Documented that users must re-add their profile after deploying the new GitHub Pages scope list to mint refreshed tokens with the new permission
+
+ Files Modified:
+   • README.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/data/SpotifyLibraryRepository.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/model/SpotifyModels.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/HomeScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/LibraryScreen.kt
+   • docs/index.html
+
+ Build: NOT RUN
+ Tests: NOT RUN
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.7  —  2026-03-10
+═══════════════════════════════════════════════════════════════
+ Summary: Resolved GitHub issue sweep for queueing, now playing polish, and night-mode sync
+
+ Changes:
+   • Anchored Settings at the bottom of the sidebar and moved Now Playing above it
+   • Added long-press queue actions for tracks, podcast episodes, albums, playlists, search results, and Liked Songs
+   • Added Spotify add-to-queue controller support with batch queue hydration in SpotifyViewModel
+   • Added ±15 second skip controls for spoken-word playback and enlarged the explicit badge on Now Playing
+   • Fixed liked-song heart refresh so Now Playing re-checks saved status when opened and while the same track remains active
+   • Hardened podcast metadata sync with faster polling, a retry on transient null responses, and a short tolerance window before marking playback stale
+   • Added car-night-aware theming with a darker Now Playing scrim when the system switches to night mode
+
+ Files Modified:
+   • README.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/SpotifyPlaybackController.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/components/AlbumArtTile.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/components/ExplicitBadge.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/components/PlayerControls.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/LibraryScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/NowPlayingScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/PlaylistDetailScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/PodcastDetailScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SearchScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/theme/Theme.kt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.6  —  2026-03-09
 ═══════════════════════════════════════════════════════════════
  Summary: Release v2.8.0 — Custom Mix art grids, marketing page, playback fix

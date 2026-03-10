@@ -46,6 +46,7 @@ import com.google.zxing.MultiFormatWriter
 @Composable
 fun AddProfileScreen(
     viewModel: AddProfileViewModel,
+    refreshProfileId: String? = null,
     onBack: () -> Unit,
     onCompleted: () -> Unit
 ) {
@@ -54,10 +55,13 @@ fun AddProfileScreen(
     val isWaitingForProfile by viewModel.isWaitingForProfile.collectAsState()
     val isCompleting by viewModel.isCompleting.collectAsState()
     val isCompleted by viewModel.isCompleted.collectAsState()
+    val isRefreshSession by viewModel.isRefreshSession.collectAsState()
+    val refreshTargetName by viewModel.refreshTargetName.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val isRefreshRequest = refreshProfileId != null || isRefreshSession
 
-    LaunchedEffect(Unit) {
-        viewModel.startNewSession()
+    LaunchedEffect(refreshProfileId) {
+        viewModel.startNewSession(refreshProfileId)
     }
 
     LaunchedEffect(isCompleted) {
@@ -85,7 +89,7 @@ fun AddProfileScreen(
                 )
             }
             Text(
-                text = "Add Profile",
+                text = if (isRefreshRequest) "Refresh Permissions" else "Add Profile",
                 style = MaterialTheme.typography.headlineMedium,
                 color = SpotifyWhite
             )
@@ -108,14 +112,42 @@ fun AddProfileScreen(
                         .padding(32.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text("1. Scan this QR code with your phone.", style = MaterialTheme.typography.headlineSmall, color = SpotifyWhite)
+                    Text(
+                        if (isRefreshRequest) {
+                            "1. Scan this QR code with your phone to refresh ${refreshTargetName ?: "this profile"}."
+                        } else {
+                            "1. Scan this QR code with your phone."
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = SpotifyWhite
+                    )
                     Spacer(Modifier.height(24.dp))
-                    Text("2. Log in to Spotify.", style = MaterialTheme.typography.headlineSmall, color = SpotifyWhite)
+                    Text(
+                        if (isRefreshRequest) {
+                            "2. Approve Spotify again so the updated permissions are granted."
+                        } else {
+                            "2. Log in to Spotify."
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = SpotifyWhite
+                    )
                     Spacer(Modifier.height(24.dp))
-                    Text("3. Your profile will be added automatically.", style = MaterialTheme.typography.headlineSmall, color = SpotifyWhite)
+                    Text(
+                        if (isRefreshRequest) {
+                            "3. The existing profile will be updated in place without creating a duplicate."
+                        } else {
+                            "3. Your profile will be added automatically."
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = SpotifyWhite
+                    )
                     Spacer(Modifier.height(32.dp))
                     Text(
-                        text = if (isCompleting) "Finalizing profile..." else "Waiting for your phone to finish sign-in.",
+                        text = if (isCompleting) {
+                            if (isRefreshRequest) "Finalizing refreshed permissions..." else "Finalizing profile..."
+                        } else {
+                            if (isRefreshRequest) "Waiting for Spotify to return the refreshed consent." else "Waiting for your phone to finish sign-in."
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = SpotifyLightGray
                     )
@@ -123,7 +155,7 @@ fun AddProfileScreen(
                         Spacer(Modifier.height(24.dp))
                         Text(text = it, style = MaterialTheme.typography.bodyLarge, color = Color(0xFFFFB4AB))
                         Spacer(Modifier.height(16.dp))
-                        Button(onClick = { viewModel.startNewSession() }) {
+                        Button(onClick = { viewModel.startNewSession(refreshProfileId) }) {
                             Text("Generate New Code")
                         }
                     }
@@ -168,7 +200,11 @@ fun AddProfileScreen(
                     )
                     Spacer(Modifier.height(12.dp))
                     Text(
-                        text = if (isWaitingForProfile) "Code stays active until sign-in completes." else "Preparing secure session...",
+                        text = if (isWaitingForProfile) {
+                            if (isRefreshRequest) "This refresh session stays active until Spotify re-consent completes." else "Code stays active until sign-in completes."
+                        } else {
+                            "Preparing secure session..."
+                        },
                         style = MaterialTheme.typography.bodyLarge,
                         color = SpotifyLightGray
                     )

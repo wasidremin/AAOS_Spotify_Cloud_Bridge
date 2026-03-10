@@ -7,10 +7,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -25,6 +31,11 @@ import com.cloudbridge.spotify.ui.theme.SpotifyCardSurface
 import com.cloudbridge.spotify.ui.theme.SpotifyGreen
 import com.cloudbridge.spotify.ui.theme.SpotifyLightGray
 import com.cloudbridge.spotify.ui.theme.SpotifyWhite
+
+data class ContextMenuAction(
+    val label: String,
+    val onClick: () -> Unit
+)
 
 /**
  * A square album-art tile used in grid layouts throughout the app.
@@ -52,11 +63,14 @@ fun AlbumArtTile(
     subtitle: String? = null,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    contextActions: List<ContextMenuAction> = emptyList(),
     badgeText: String? = null,
     isPinned: Boolean = false,
     artworkContent: (@Composable BoxScope.() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    var menuExpanded by remember(title, subtitle, contextActions.size) { mutableStateOf(false) }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -64,7 +78,15 @@ fun AlbumArtTile(
             .aspectRatio(1f)
             .clip(RoundedCornerShape(12.dp))
             .background(SpotifyCardSurface)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    when {
+                        contextActions.isNotEmpty() -> menuExpanded = true
+                        onLongClick != null -> onLongClick()
+                    }
+                }
+            )
     ) {
         if (artworkContent != null) {
             Box(
@@ -155,6 +177,22 @@ fun AlbumArtTile(
                     color = SpotifyLightGray,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+            modifier = Modifier.align(Alignment.TopEnd)
+        ) {
+            contextActions.forEach { action ->
+                DropdownMenuItem(
+                    text = { Text(action.label) },
+                    onClick = {
+                        menuExpanded = false
+                        action.onClick()
+                    }
                 )
             }
         }

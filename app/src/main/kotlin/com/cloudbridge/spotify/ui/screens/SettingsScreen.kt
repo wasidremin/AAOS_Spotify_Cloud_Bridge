@@ -51,6 +51,9 @@ fun SettingsScreen(
     val playInstantly by viewModel.playInstantly.collectAsState()
     val profiles by viewModel.userProfiles.collectAsState()
     val activeProfileId by viewModel.activeProfileId.collectAsState()
+    val activeProfile = remember(profiles, activeProfileId) {
+        profiles.firstOrNull { it.id == activeProfileId } ?: profiles.firstOrNull()
+    }
     val context = LocalContext.current
 
     // Refresh devices on entry
@@ -110,7 +113,7 @@ fun SettingsScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
                         .background(SpotifyDarkGray)
-                        .clickable { viewModel.navigateTo(SpotifyViewModel.Screen.AddProfile) }
+                        .clickable { viewModel.navigateTo(SpotifyViewModel.Screen.AddProfile()) }
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -191,6 +194,41 @@ fun SettingsScreen(
             item {
                 Spacer(Modifier.height(16.dp))
                 SectionHeader("Layout & Display")
+            }
+
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SpotifyDarkGray)
+                        .clickable(enabled = activeProfile != null) {
+                            activeProfile?.id?.let { profileId ->
+                                viewModel.navigateTo(SpotifyViewModel.Screen.AddProfile(refreshProfileId = profileId))
+                            }
+                        }
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Refresh Permissions",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = SpotifyWhite
+                        )
+                        Text(
+                            activeProfile?.let { "Re-consent ${it.name} and keep the same saved profile." }
+                                ?: "Select or add a Spotify profile first.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpotifyLightGray
+                        )
+                    }
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = null,
+                        tint = if (activeProfile != null) SpotifyGreen else SpotifyLightGray
+                    )
+                }
             }
 
             item {
@@ -282,12 +320,18 @@ fun SettingsScreen(
                         .padding(horizontal = 20.dp, vertical = 16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "Re-authenticate with Spotify",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = SpotifyWhite,
-                        modifier = Modifier.weight(1f)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Manual credential editor",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = SpotifyWhite
+                        )
+                        Text(
+                            "Fallback for entering client IDs or refresh tokens by hand.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpotifyLightGray
+                        )
+                    }
                     Icon(
                         Icons.Default.LockOpen,
                         contentDescription = null,
