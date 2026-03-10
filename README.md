@@ -2,38 +2,62 @@
 
 An Android Automotive OS (AAOS) media app that provides a fully custom Jetpack Compose UI for Spotify browsing and playback control — without playing any audio locally.
 
+
+
 ## The Concept
 
 This app provides a pixel-perfect, CarPlay-inspired music interface for your car's infotainment system. Unlike the native AAOS media templates (which have rigid layouts and UXR scrolling limits), this uses a custom `distractionOptimized` Activity to deliver a premium automotive experience:
 
-1. **Browsing**: A large-tile grid home screen with recently played, top tracks, featured playlists, and new releases — all fetched via the **Spotify Web API**
-2. **Playback**: When you tap play, a **REST API command** targets Spotify on your phone as the playback device
-3. **Audio**: Your phone plays the audio → Bluetooth A2DP → car speakers
+1. **Browsing**: A large-tile grid home screen with recently played, top tracks, featured playlists, and new releases — all fetched via the **Spotify Web API**.
+2. **Playback**: When you tap play, a **REST API command** targets Spotify on your phone as the playback device.
+3. **Audio**: Your phone plays the audio → Bluetooth A2DP → car speakers.
 
-The app intentionally does not register as an AAOS media source. Native Bluetooth remains the active audio route so phone playback, steering wheel controls, and speaker output stay stable.
+The app intentionally does not register as an AAOS media source. Native Bluetooth remains the active audio route so phone playback, steering wheel controls, and speaker output stay stable. This "cloud-bridge" pattern bypasses the need for Android Auto or Apple CarPlay while giving you full control over the car's UI.
 
-This "cloud-bridge" pattern bypasses the need for Android Auto or Apple CarPlay while giving you full control over the car's UI.
+## Configuring the Spotify API
+
+Because this app utilizes a "Smart TV" style QR-code login flow to bypass the car's lack of a web browser, your Spotify Developer application must be configured exactly as follows to ensure the OAuth flow works seamlessly.
+
+1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and create an app.
+2. Note your **Client ID** and **Client Secret**.
+3. **Crucial Step:** In your app's Settings, add the following exact URL to your **Redirect URIs** (the trailing slash is mandatory):
+   `https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/`
+4. Ensure your app has access to the Web API. The web app companion will automatically request the following required scopes during login: `user-library-read`, `user-library-modify`, `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`, `user-read-recently-played`, `user-top-read`, and `playlist-read-private`.
+
+## Adding Accounts (The QR "Cloud Relay" Workflow)
+
+
+
+To solve the problem of authenticating on a car screen without a built-in browser, this app uses a Multi-Profile "Cloud Relay" architecture powered by Firebase and GitHub Pages. 
+
+Here is the exact workflow for adding an account:
+1. **Initiation:** Tap "Add profile with QR code" in the app's Settings. 
+2. **Session Generation:** The car generates a random 6-character session code (e.g., `FPHTZK`) and displays a QR Code.
+3. **Scanning:** The user scans the QR code with their phone, which opens the companion web app hosted on GitHub Pages.
+4. **Authentication:** The user enters their Spotify Developer `Client ID` and `Client Secret` into the secure web page on their phone, which redirects them to Spotify to authorize the app.
+5. **The Relay:** Once authorized, the web app securely drops the resulting `refresh_token`, `client_id`, and the user's profile metadata into a temporary Firebase Realtime Database node linked to the 6-character session code.
+6. **Completion:** The car, which has been polling the Firebase endpoint, detects the payload, downloads the credentials into a local encrypted Room database (`user_profiles`), sets the profile to active, and instantly deletes the payload from the cloud. 
+
+*Note: You can add multiple profiles (e.g., "Primary Profile", "Spouse", "Guest") and seamlessly switch between them in the Settings tab. Doing so swaps the active token and instantly reloads the Home and Library grids with that user's customized data.*
 
 ## Quick Start
 
-1. Clone the repo and open in Android Studio
-2. Set up an AAOS emulator (API 33+ Automotive image)
-3. Create a [Spotify Developer App](https://developer.spotify.com/dashboard) and obtain a refresh token
-4. Build and install: `./gradlew assembleDebug && adb install app/build/outputs/apk/debug/app-debug.apk`
-5. Enter your Client ID + Refresh Token in Settings
-6. Launch "Spotify Cloud-Bridge" from the AAOS app launcher
+1. Clone the repo and open in Android Studio.
+2. Set up an AAOS emulator (API 33+ Automotive image).
+3. Create a [Spotify Developer App](https://developer.spotify.com/dashboard) (configured with the Redirect URI mentioned above).
+4. Set up a free Firebase Realtime Database in Test Mode and update `CLOUD_RELAY_BASE_URL` in `RetrofitProvider.kt` with your Firebase URL.
+5. Build and install: `./gradlew assembleDebug && adb install app/build/outputs/apk/debug/app-debug.apk`
+6. Launch "Spotify Cloud-Bridge" from the AAOS app launcher.
+7. You will immediately be presented with the QR Code onboarding screen. Scan it with your phone, enter your API credentials, and log in.
 
-See [docs/SETUP_GUIDE.md](docs/SETUP_GUIDE.md) for detailed instructions including how to obtain a refresh token.
-
-For in-car release testing, generate the signed Android App Bundle with `./gradlew bundleRelease`. The artifact is written to [app/build/outputs/bundle/release/app-release.aab](app/build/outputs/bundle/release/app-release.aab). If you need a directly sideloadable binary for the car, build `./gradlew assembleRelease` and use [app/build/outputs/apk/release/app-release.apk](app/build/outputs/apk/release/app-release.apk).
-
-For Windows, the repo now includes an automated refresh-token helper at [scripts/refresh-spotify-token.ps1](scripts/refresh-spotify-token.ps1). Fill in [scripts/spotify-oauth.config.xml](scripts/spotify-oauth.config.xml), run the script, approve Spotify in the browser, and it will update [app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt](app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt).
+*Alternative (Legacy) Login:* For CI or manual terminal setups, you can still inject credentials directly via ADB: 
+`adb shell am start -n com.cloudbridge.spotify/.auth.SetupActivity --es client_id <id> --es refresh_token <token>`
 
 The GitHub Pages companion now requests both `playlist-read-private` and `playlist-read-collaborative`. After deploying updates to [docs/index.html](docs/index.html), use the new **Refresh Permissions** action in Settings to re-consent the active profile in place so the refreshed token includes the new playlist scope without creating a duplicate profile.
 
 ## Architecture
 
-```
+```text
 AAOS Launcher → MainActivity (distractionOptimized)
                       ↓
                Jetpack Compose UI
@@ -45,7 +69,6 @@ AAOS Launcher → MainActivity (distractionOptimized)
                SpotifyPlaybackController → Spotify Web API
                       ↓
                Phone plays audio → Bluetooth → Car speakers
-```
 
 ## Refactor Review Notes
 
@@ -54,7 +77,7 @@ AAOS Launcher → MainActivity (distractionOptimized)
 - `CustomMixEngine` now owns Daily Drive and decade mix queue construction.
 - `SpotifyViewModel` remains the UI orchestrator, which keeps screen-facing state separate from domain rules.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture document.
+See `docs/ARCHITECTURE.md` for the full architecture document.
 
 ## Tech Stack
 
@@ -68,7 +91,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 | Networking | Retrofit 2.11.0 + OkHttp 4.12.0 |
 | JSON | Moshi 1.15.1 (KSP codegen) |
 | Async | Kotlin Coroutines 1.9.0 |
-| Storage | Jetpack DataStore Preferences |
+| Storage | Jetpack DataStore Preferences + Room Database |
 | Build | Gradle Kotlin DSL with version catalog |
 
 ## UI Screens
@@ -119,13 +142,10 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 - Refresh-permissions QR sessions pass the active profile ID through the relay payload so re-consent swaps in the new refresh token while preserving the original profile identity.
 - The Add Profile relay now targets the Firebase Realtime Database endpoint `https://aaosspotiftycloudbridge-default-rtdb.firebaseio.com/`.
 - Upgrades from the older single-profile build migrate any legacy DataStore credentials into the new Room-backed profile store on startup so saved keys are preserved.
-- Daily Drive now leads with a podcast, follows with a shorter music block, then returns to podcast content sooner.
-- Profile switches currently clear cached library rows and pinned items before reload so one account's content cannot bleed into another account's UI.
 - Search uses a 750ms debounce and `imePadding()` so the on-screen keyboard does not obscure results.
 - Playlist/Artist detail rows show a speaker icon for the active track (not color-only), improving glanceability.
 - MiniPlayer width is responsive (`fillMaxWidth(0.55f)` with `widthIn(max = 600.dp)`) for split-screen resilience and increased to 112dp height with 88dp album art and 52dp play/pause icon for better automotive visibility.
 - Podcast episodes and audiobook chapters in Queue, Now Playing, and MiniPlayer use `SpotifyPlayableItem` with artwork fallback chain (item images → album/show/audiobook) and type-aware subtitle text.
-- Playlist, album, and artist surfaces now expose Start Radio actions powered by `GET /v1/recommendations` seeds from the current context.
 
 ## Runtime Resiliency
 
@@ -134,7 +154,6 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 - `TokenManager` now resolves auth from the active Room-backed profile before interceptors and token refresh paths read credentials.
 - The app displays an in-app top red banner: **"Offline Mode - Reconnecting..."** when connectivity drops.
 - The app also surfaces Spotify auth/scope failures (HTTP 401/403) with a top banner and direct **Open** action into Setup.
-- Search and home hydration degrade gracefully to empty-state UI when API calls fail (no app crash).
 
 ## Request Budget Audit
 
@@ -150,29 +169,24 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture docum
 ```bash
 # Unit tests
 ./gradlew test
-```
 
-See [docs/TESTING.md](docs/TESTING.md) for the full testing guide.
 
-## Project Structure
+##Project Structure
 
-```
 app/src/main/kotlin/com/cloudbridge/spotify/
 ├── SpotifyCloudBridgeApp.kt          # Application — DI root
-├── auth/                              # Token management & credential entry
-├── data/                              # Repository layer for Spotify library/cache access
-├── domain/                            # Custom mix generation and other domain logic
-├── network/                           # Retrofit services & data models
-├── player/                            # Playback controller & device management
+├── auth/                              # Token management, interceptors, Setup UI
+├── data/                              # Repository layer (SpotifyLibraryRepository)
+├── domain/                            # CustomMixEngine (Decade mixes, Daily Drive)
+├── network/                           # Retrofit services & Moshi data models
+├── player/                            # SpotifyPlaybackController & DeviceManager
+├── receiver/                          # Bluetooth auto-launch capabilities
+├── cache/                             # Room DB entities and DAOs
 ├── ui/
 │   ├── MainActivity.kt               # Compose entry point (distractionOptimized)
-│   ├── SpotifyViewModel.kt           # UI state + navigation orchestration
-│   ├── theme/                         # Material3 dark theme, Spotify colors
-│   ├── screens/                       # Home, Library, NowPlaying, Queue, etc.
+│   ├── SpotifyViewModel.kt           # StateFlow + navigation orchestration
+│   ├── AddProfileViewModel.kt        # QR polling orchestration
+│   ├── theme/                         # Material3 dark theme, Typography, Colors
+│   ├── screens/                       # Home, Library, NowPlaying, Queue, Settings, etc.
 │   └── components/                    # MiniPlayer, AlbumArtTile, PlayerControls
-└── util/                              # Shared utilities
-```
-
-## License
-
-Private project — not for redistribution.
+└── util/                              # Sealed ApiResult wrappers
