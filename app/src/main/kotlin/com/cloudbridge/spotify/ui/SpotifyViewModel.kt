@@ -1141,8 +1141,11 @@ class SpotifyViewModel(
                 _isOffline.value = false
             } catch (e: Exception) {
                 if (e is retrofit2.HttpException && e.code() == 403) {
-                    // Suppress global re-auth banner, handle gracefully in UI
-                    _detailError.value = "Tracklist hidden by Spotify (Dev Mode restriction).\n\nYou can still play this using 'Play All'!"
+                    // 403 = token lacks playlist-read-collaborative (or playlist-read-private) scope.
+                    // This commonly happens if the profile was created before these scopes were added.
+                    // The user must use "Refresh Permissions" in Settings to re-consent with the updated scope list.
+                    Log.w(TAG, "403 Forbidden loading playlist $playlistId — likely missing playlist scope. Advising user to refresh permissions.")
+                    _detailError.value = "Tracks unavailable (missing Spotify permission).\n\nGo to Settings → Manage Profiles → Refresh Permissions to grant access to this playlist type."
                 } else if (e is GlobalRateLimitException) {
                     _detailError.value = buildRateLimitMessage(e.lockedUntilEpochMs)
                 } else {
@@ -2073,11 +2076,19 @@ class SpotifyViewModel(
 
         val tracks = mutableListOf<SpotifyTrack>()
         var offset = 0
-        do {
-            val page = api.getPlaylistTracks(playlistId, limit = 50, offset = offset)
-            tracks += page.items.filterNotNull().mapNotNull { it.track }
-            offset += 50
-        } while (page.next != null && offset < page.total && tracks.size < MAX_QUEUE_BATCH)
+        try {
+            do {
+                val page = api.getPlaylistTracks(playlistId, limit = 50, offset = offset)
+                tracks += page.items.filterNotNull().mapNotNull { it.track }
+                offset += 50
+            } while (page.next != null && offset < page.total && tracks.size < MAX_QUEUE_BATCH)
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 403) {
+                Log.w(TAG, "403 Forbidden fetching tracks for playlist $playlistId — missing playlist scope. User should Refresh Permissions.")
+            } else {
+                throw e
+            }
+        }
         return tracks.take(MAX_QUEUE_BATCH)
     }
 

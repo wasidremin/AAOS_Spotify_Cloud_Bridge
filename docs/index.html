@@ -135,7 +135,11 @@
             document.getElementById('status-text').innerText = 'Opening Spotify approval...';
         }
 
-        const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}&state=${initialSession}`;
+        // show_dialog=true is required in refresh mode to force Spotify to re-prompt
+        // for consent. Without it, Spotify silently reuses the existing OAuth grant
+        // (which may lack newly-added scopes like playlist-read-collaborative).
+        const showDialog = mode === 'refresh' ? '&show_dialog=true' : '';
+        const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}&state=${initialSession}${showDialog}`;
         window.location.href = authUrl;
     }
 
