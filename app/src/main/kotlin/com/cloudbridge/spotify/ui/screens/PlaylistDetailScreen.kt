@@ -8,9 +8,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -206,7 +207,7 @@ private fun TrackRow(
         ) {
             if (isCurrentlyPlaying) {
                 Icon(
-                    imageVector = Icons.Filled.VolumeUp,
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
                     contentDescription = "Now playing",
                     tint = SpotifyGreen,
                     modifier = Modifier.size(32.dp)
@@ -259,12 +260,24 @@ private fun TrackRow(
             )
         }
 
-        // Duration
+        // Duration + Queue action
         Text(
             text = formatDuration(track.durationMs),
             style = MaterialTheme.typography.bodySmall,
             color = SpotifyMediumGray
         )
+        Spacer(Modifier.width(4.dp))
+        IconButton(
+            onClick = { viewModel.addTrackToQueue(track.uri) },
+            modifier = Modifier.size(40.dp)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.QueueMusic,
+                contentDescription = "Add to queue",
+                tint = SpotifyLightGray,
+                modifier = Modifier.size(20.dp)
+            )
+        }
     }
 }
 

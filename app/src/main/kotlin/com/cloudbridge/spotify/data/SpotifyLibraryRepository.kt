@@ -2,6 +2,7 @@ package com.cloudbridge.spotify.data
 
 import android.util.Log
 import com.cloudbridge.spotify.cache.CacheDatabase
+import com.cloudbridge.spotify.cache.CachedAudiobook
 import com.cloudbridge.spotify.cache.CachedAlbum
 import com.cloudbridge.spotify.cache.CachedPlaylist
 import com.cloudbridge.spotify.cache.CachedShow
@@ -10,6 +11,8 @@ import com.cloudbridge.spotify.network.SpotifyApiService
 import com.cloudbridge.spotify.network.model.PlaylistTracksRef
 import com.cloudbridge.spotify.network.model.SpotifyAlbum
 import com.cloudbridge.spotify.network.model.SpotifyArtist
+import com.cloudbridge.spotify.network.model.SpotifyAudiobook
+import com.cloudbridge.spotify.network.model.SpotifyChapter
 import com.cloudbridge.spotify.network.model.SpotifyEpisode
 import com.cloudbridge.spotify.network.model.SpotifyImage
 import com.cloudbridge.spotify.network.model.SpotifyPlaylist
@@ -86,6 +89,43 @@ class SpotifyLibraryRepository(
         }
 
         return fresh
+    }
+
+    suspend fun getCachedAudiobooks(): List<SpotifyAudiobook> =
+        cacheDb.libraryCacheDao().getAllAudiobooks().map { it.toSpotifyAudiobook() }
+
+    suspend fun refreshSavedAudiobooks(): List<SpotifyAudiobook> {
+        var offset = 0
+        val fresh = mutableListOf<SpotifyAudiobook>()
+        do {
+            val page = api.getSavedAudiobooks(limit = 50, offset = offset)
+            fresh += page.items.filterNotNull()
+            offset += 50
+        } while (page.next != null && offset < page.total)
+
+        cacheDb.libraryCacheDao().apply {
+            clearAudiobooks()
+            insertAudiobooks(fresh.map { it.toCachedAudiobook() })
+        }
+
+        return fresh
+    }
+
+    suspend fun getAudiobookChapters(audiobookId: String, maxChapters: Int = Int.MAX_VALUE): List<SpotifyChapter> {
+        val chapters = mutableListOf<SpotifyChapter>()
+        var offset = 0
+
+        while (chapters.size < maxChapters) {
+            val page = api.getAudiobookChapters(audiobookId = audiobookId, limit = 50, offset = offset)
+            val items = page.items.filterNotNull()
+            if (items.isEmpty()) break
+
+            chapters += items
+            if (page.next == null || chapters.size >= maxChapters) break
+            offset += page.limit
+        }
+
+        return chapters.take(maxChapters)
     }
 
     suspend fun getCachedShows(): List<SpotifyShow> =
@@ -282,6 +322,28 @@ class SpotifyLibraryRepository(
         uri = uri,
         imageUrl = images?.firstOrNull()?.url,
         publisher = publisher,
+        description = description
+    )
+
+    private fun CachedAudiobook.toSpotifyAudiobook(): SpotifyAudiobook = SpotifyAudiobook(
+        id = id,
+        name = name,
+        uri = uri,
+        images = imageUrl?.let { listOf(SpotifyImage(url = it)) },
+        authors = authorName?.let { listOf(com.cloudbridge.spotify.network.model.SpotifyAuthor(name = it)) },
+        publisher = publisher,
+        totalChapters = totalChapters,
+        description = description
+    )
+
+    private fun SpotifyAudiobook.toCachedAudiobook(): CachedAudiobook = CachedAudiobook(
+        id = id,
+        name = name,
+        uri = uri,
+        imageUrl = images?.firstOrNull()?.url,
+        authorName = authors?.firstOrNull()?.name,
+        publisher = publisher,
+        totalChapters = totalChapters,
         description = description
     )
 }

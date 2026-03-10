@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -174,28 +173,29 @@ fun AddProfileScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
+                    // Fixed 240 dp square so the QR never overflows on the
+                    // AAOS wide-screen layout regardless of screen height.
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(0.8f)
-                            .aspectRatio(1f)
-                            .background(Color.White, RoundedCornerShape(24.dp)),
+                            .size(240.dp)
+                            .background(Color.White, RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         if (qrBitmap != null) {
                             Image(
                                 bitmap = qrBitmap.asImageBitmap(),
                                 contentDescription = "QR code for Spotify profile onboarding",
-                                modifier = Modifier.fillMaxSize().padding(24.dp)
+                                modifier = Modifier.fillMaxSize().padding(16.dp)
                             )
                         } else {
                             CircularProgressIndicator(color = SpotifyGreen)
                         }
                     }
 
-                    Spacer(Modifier.height(24.dp))
+                    Spacer(Modifier.height(16.dp))
                     Text(
                         text = sessionCode,
-                        style = MaterialTheme.typography.displayMedium,
+                        style = MaterialTheme.typography.headlineLarge,
                         color = SpotifyWhite
                     )
                     Spacer(Modifier.height(12.dp))

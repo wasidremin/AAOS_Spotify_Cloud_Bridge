@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.cloudbridge.spotify.network.model.SpotifyAlbum
 import com.cloudbridge.spotify.network.model.SpotifyArtist
+import com.cloudbridge.spotify.network.model.SpotifyAudiobook
 import com.cloudbridge.spotify.network.model.SpotifyPlaylist
 import com.cloudbridge.spotify.network.model.SpotifyShow
 import com.cloudbridge.spotify.ui.SpotifyViewModel
@@ -62,6 +63,12 @@ private enum class ShowSortOption(val label: String) {
     Publisher("Publisher")
 }
 
+private enum class AudiobookSortOption(val label: String) {
+    RecentlyAdded("Recently Added"),
+    Alphabetical("Alphabetical"),
+    Author("Author")
+}
+
 /**
  * Library screen with tabbed navigation: **Playlists** / **Albums** / **Podcasts**.
  *
@@ -83,6 +90,7 @@ fun LibraryScreen(
     val playlists by viewModel.playlists.collectAsState()
     val albums by viewModel.savedAlbums.collectAsState()
     val shows by viewModel.savedShows.collectAsState()
+    val audiobooks by viewModel.savedAudiobooks.collectAsState()
     val artists by viewModel.followedArtists.collectAsState()
     val pinnedItems by viewModel.pinnedItems.collectAsState()
     val isLoading by viewModel.isLibraryLoading.collectAsState()
@@ -91,15 +99,17 @@ fun LibraryScreen(
     val pinnedUris = remember(pinnedItems) { pinnedItems.mapTo(mutableSetOf()) { it.uri } }
 
     val selectedTab = viewModel.libraryTab
-    val tabs = listOf("Playlists", "Albums", "Artists", "Podcasts")
+    val tabs = listOf("Playlists", "Albums", "Artists", "Podcasts", "Audiobooks")
     var playlistFilter by rememberSaveable { mutableStateOf("") }
     var albumFilter by rememberSaveable { mutableStateOf("") }
     var artistFilter by rememberSaveable { mutableStateOf("") }
     var showFilter by rememberSaveable { mutableStateOf("") }
+    var audiobookFilter by rememberSaveable { mutableStateOf("") }
     var playlistSortLabel by rememberSaveable { mutableStateOf(PlaylistSortOption.RecentlyAdded.label) }
     var albumSortLabel by rememberSaveable { mutableStateOf(AlbumSortOption.RecentlyAdded.label) }
     var artistSortLabel by rememberSaveable { mutableStateOf(ArtistSortOption.RecentlyAdded.label) }
     var showSortLabel by rememberSaveable { mutableStateOf(ShowSortOption.RecentlyAdded.label) }
+    var audiobookSortLabel by rememberSaveable { mutableStateOf(AudiobookSortOption.RecentlyAdded.label) }
 
     // Load artists when Artists tab is first selected
     LaunchedEffect(selectedTab) {
@@ -189,6 +199,16 @@ fun LibraryScreen(
                 onFilterTextChange = { showFilter = it },
                 sortOption = ShowSortOption.entries.first { it.label == showSortLabel },
                 onSortOptionChange = { showSortLabel = it.label }
+            )
+            4 -> AudiobookList(
+                audiobooks = audiobooks,
+                viewModel = viewModel,
+                contentPadding = contentPadding,
+                gridColumns = gridColumns,
+                filterText = audiobookFilter,
+                onFilterTextChange = { audiobookFilter = it },
+                sortOption = AudiobookSortOption.entries.first { it.label == audiobookSortLabel },
+                onSortOptionChange = { audiobookSortLabel = it.label }
             )
         }
     }
@@ -749,6 +769,114 @@ private fun ShowList(
                             }
                         ),
                         onClick = { viewModel.navigateTo(SpotifyViewModel.Screen.PodcastDetail(show.id, show.name, show.uri)) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Audiobooks ────────────────────────────────────────────────────────
+
+@Composable
+private fun AudiobookList(
+    audiobooks: List<SpotifyAudiobook>,
+    viewModel: SpotifyViewModel,
+    contentPadding: PaddingValues,
+    gridColumns: Int,
+    filterText: String,
+    onFilterTextChange: (String) -> Unit,
+    sortOption: AudiobookSortOption,
+    onSortOptionChange: (AudiobookSortOption) -> Unit
+) {
+    val layoutDirection = LocalLayoutDirection.current
+    var isGridView by rememberSaveable { mutableStateOf(true) }
+    val query = filterText.trim().lowercase()
+    val filteredAudiobooks = remember(audiobooks, query, sortOption) {
+        audiobooks
+            .filter { book ->
+                query.isBlank() ||
+                    book.name.contains(query, ignoreCase = true) ||
+                    book.authors?.any { it.name.contains(query, ignoreCase = true) } == true ||
+                    (book.publisher?.contains(query, ignoreCase = true) == true)
+            }
+            .let { matches ->
+                when (sortOption) {
+                    AudiobookSortOption.RecentlyAdded -> matches
+                    AudiobookSortOption.Alphabetical -> matches.sortedBy { it.name.lowercase() }
+                    AudiobookSortOption.Author -> matches.sortedWith(
+                        compareBy<SpotifyAudiobook>(
+                            { it.authors?.firstOrNull()?.name?.lowercase() ?: "" },
+                            { it.name.lowercase() }
+                        )
+                    )
+                }
+            }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        LibraryToolbar(
+            filterValue = filterText,
+            onFilterValueChange = onFilterTextChange,
+            filterPlaceholder = "Filter audiobooks",
+            sortLabel = sortOption.label,
+            sortOptions = AudiobookSortOption.entries.map { it.label },
+            onSortSelected = { label -> onSortOptionChange(AudiobookSortOption.entries.first { it.label == label }) },
+            isGridView = isGridView,
+            onToggleView = { isGridView = !isGridView }
+        )
+
+        if (filteredAudiobooks.isEmpty()) {
+            EmptyState(if (audiobooks.isEmpty()) "No saved audiobooks" else "No matching audiobooks")
+            return
+        }
+
+        if (isGridView) {
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(gridColumns),
+                contentPadding = PaddingValues(
+                    start = 16.dp + contentPadding.calculateStartPadding(layoutDirection),
+                    top = 4.dp,
+                    end = 16.dp + contentPadding.calculateEndPadding(layoutDirection),
+                    bottom = 100.dp + contentPadding.calculateBottomPadding()
+                ),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(filteredAudiobooks, key = { it.id }) { book ->
+                    AlbumArtTile(
+                        imageUrl = viewModel.bestArtwork(book.images),
+                        title = book.name,
+                        subtitle = book.authors?.firstOrNull()?.name ?: book.publisher ?: "Audiobook",
+                        contextActions = emptyList(),
+                        onClick = {
+                            viewModel.navigateTo(
+                                SpotifyViewModel.Screen.AudiobookDetail(book.id, book.name, book.uri)
+                            )
+                        }
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(
+                    top = 4.dp,
+                    bottom = 100.dp + contentPadding.calculateBottomPadding()
+                ),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(filteredAudiobooks, key = { it.id }) { book ->
+                    LibraryRow(
+                        imageUrl = viewModel.bestArtwork(book.images),
+                        title = book.name,
+                        subtitle = book.authors?.firstOrNull()?.name ?: book.publisher ?: "Audiobook",
+                        contextActions = emptyList(),
+                        onClick = {
+                            viewModel.navigateTo(
+                                SpotifyViewModel.Screen.AudiobookDetail(book.id, book.name, book.uri)
+                            )
+                        }
                     )
                 }
             }

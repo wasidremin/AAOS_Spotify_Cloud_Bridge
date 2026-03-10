@@ -51,6 +51,21 @@ data class CachedShow(
     val description: String?
 )
 
+/**
+ * Cached saved-audiobook entry: stores fields rendered in the Library audiobooks tab.
+ */
+@Entity(tableName = "cached_audiobooks")
+data class CachedAudiobook(
+    @PrimaryKey val id: String,
+    val name: String,
+    val uri: String,
+    val imageUrl: String?,
+    val authorName: String?,
+    val publisher: String?,
+    val totalChapters: Int?,
+    val description: String?
+)
+
 @Entity(tableName = "pinned_items")
 data class PinnedItem(
     @PrimaryKey val uri: String,
@@ -119,11 +134,23 @@ interface LibraryCacheDao {
     @androidx.room.Query("DELETE FROM cached_shows")
     suspend fun clearShows()
 
+    // ── Audiobooks ────────────────────────────────────────────────────
+
+    @androidx.room.Query("SELECT * FROM cached_audiobooks")
+    suspend fun getAllAudiobooks(): List<CachedAudiobook>
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertAudiobooks(audiobooks: List<CachedAudiobook>)
+
+    @androidx.room.Query("DELETE FROM cached_audiobooks")
+    suspend fun clearAudiobooks()
+
     @androidx.room.Transaction
     suspend fun clearAll() {
         clearPlaylists()
         clearAlbums()
         clearShows()
+        clearAudiobooks()
     }
 }
 
@@ -187,8 +214,8 @@ interface UserProfileDao {
 // ─── Database ─────────────────────────────────────────────────────────────────
 
 @Database(
-    entities = [CachedPlaylist::class, CachedAlbum::class, CachedShow::class, PinnedItem::class, CleanTrackMapping::class, UserProfile::class],
-    version = 4,
+    entities = [CachedPlaylist::class, CachedAlbum::class, CachedShow::class, CachedAudiobook::class, PinnedItem::class, CleanTrackMapping::class, UserProfile::class],
+    version = 5,
     exportSchema = false
 )
 abstract class CacheDatabase : RoomDatabase() {

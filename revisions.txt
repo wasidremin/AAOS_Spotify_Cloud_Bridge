@@ -1,4 +1,54 @@
 ═══════════════════════════════════════════════════════════════
+ R5.10  —  2026-03-10
+═══════════════════════════════════════════════════════════════
+ Summary: QR code overflow fix, improved 403 error messaging, per-track queue
+ button in playlist view, and full audiobook (chapter) support across the app
+
+ Changes:
+   • Fixed QR code box in AddProfileScreen to use size(240.dp) instead of
+     fillMaxWidth(0.8f)+aspectRatio(1f) — prevents QR growing off-screen on AAOS
+   • Reduced session-code typography from displayMedium to headlineLarge and
+     tightened padding so the 6-digit code is always visible beneath the QR
+   • Improved 403 error message in loadPlaylistTracks to explain all three causes:
+     missing scope, Spotify dev-mode 25-user cap, and editorial playlist restriction
+   • Added visible QueueMusic IconButton to each TrackRow in PlaylistDetailScreen
+     so users can add individual songs to queue with a single tap (long-press retained)
+   • Added SpotifyChapter model, SavedAudiobooksResponse, AudiobookChaptersResponse
+     to SpotifyModels.kt; extended SpotifyAudiobook with description + totalChapters
+   • Added CachedAudiobook Room entity; bumped CacheDatabase to version 5;
+     added getAllAudiobooks / insertAudiobooks / clearAudiobooks DAO methods
+   • Added getSavedAudiobooks, getAudiobook, getAudiobookChapters API endpoints
+     to SpotifyApiService; updated getCurrentPlayback additionalTypes to include
+     "chapter" so audiobook chapters are tracked in Now Playing
+   • Added getCachedAudiobooks, refreshSavedAudiobooks, getAudiobookChapters to
+     SpotifyLibraryRepository with CachedAudiobook<->SpotifyAudiobook mappers
+   • Added Screen.AudiobookDetail, savedAudiobooks StateFlow, detailChapters
+     StateFlow, loadSavedAudiobooks(), and loadAudiobookChapters() to SpotifyViewModel;
+     wired audiobook loading in handleScreenEntered, loadLibrary, and clearProfileScopedData
+   • Added Audiobooks tab (5th tab) to LibraryScreen with AudiobookSortOption
+     enum, AudiobookList composable (grid/list views, filter, sort by Author)
+   • Created AudiobookDetailScreen.kt with ChapterRow composable showing chapter
+     number, cover art, title, description, progress bar, and resume time display
+   • Wired AudiobookDetailScreen into MainActivity screen dispatch and Library
+     tab active-highlight check
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/AddProfileScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/PlaylistDetailScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/model/SpotifyModels.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/cache/CacheDatabase.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/SpotifyApiService.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/data/SpotifyLibraryRepository.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/LibraryScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/AudiobookDetailScreen.kt  [NEW]
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED (installed + relaunched on emulator-5554)
+═══════════════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════
  R5.9  —  2026-03-10
 ═══════════════════════════════════════════════════════════════
  Summary: Added in-place Spotify permission refresh and merged the updated companion page

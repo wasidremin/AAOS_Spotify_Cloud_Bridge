@@ -73,6 +73,24 @@ interface SpotifyApiService {
         @Query("offset") offset: Int = 0
     ): SavedShowsResponse
 
+    @GET("v1/me/audiobooks")
+    suspend fun getSavedAudiobooks(
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0
+    ): SavedAudiobooksResponse
+
+    @GET("v1/audiobooks/{id}")
+    suspend fun getAudiobook(
+        @Path("id") audiobookId: String
+    ): SpotifyAudiobook
+
+    @GET("v1/audiobooks/{id}/chapters")
+    suspend fun getAudiobookChapters(
+        @Path("id") audiobookId: String,
+        @Query("limit") limit: Int = 50,
+        @Query("offset") offset: Int = 0
+    ): AudiobookChaptersResponse
+
     // ── Home / Discovery ─────────────────────────────────────────────
 
     /** Recently played tracks — powers "Jump Back In" / "Recently Played" */
@@ -252,7 +270,7 @@ interface SpotifyApiService {
      */
     @GET("v1/me/player")
     suspend fun getCurrentPlayback(
-        @Query("additional_types") additionalTypes: String = "episode"
+        @Query("additional_types") additionalTypes: String = "episode,chapter"
     ): Response<CurrentPlaybackResponse>
 
     // ── Queue Management ─────────────────────────────────────────────

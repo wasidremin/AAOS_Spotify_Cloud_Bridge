@@ -210,6 +210,7 @@ class SpotifyViewModel(
         data class AlbumDetail(val id: String, val name: String, val uri: String?) : Screen()
         data class ArtistDetail(val id: String, val name: String, val imageUrl: String?) : Screen()
         data class PodcastDetail(val id: String, val name: String, val uri: String) : Screen()
+        data class AudiobookDetail(val id: String, val name: String, val uri: String) : Screen()
         data object Queue : Screen()
         data object Settings : Screen()
         data object HomeLayoutSettings : Screen()
@@ -276,6 +277,9 @@ class SpotifyViewModel(
     private val _savedShows = MutableStateFlow<List<SpotifyShow>>(emptyList())
     val savedShows: StateFlow<List<SpotifyShow>> = _savedShows
 
+    private val _savedAudiobooks = MutableStateFlow<List<SpotifyAudiobook>>(emptyList())
+    val savedAudiobooks: StateFlow<List<SpotifyAudiobook>> = _savedAudiobooks
+
     /** Persists selected Library tab across back-stack navigation. */
     var libraryTab by mutableIntStateOf(0)
 
@@ -289,6 +293,9 @@ class SpotifyViewModel(
 
     private val _detailEpisodes = MutableStateFlow<List<SpotifyEpisode>>(emptyList())
     val detailEpisodes: StateFlow<List<SpotifyEpisode>> = _detailEpisodes
+
+    private val _detailChapters = MutableStateFlow<List<SpotifyChapter>>(emptyList())
+    val detailChapters: StateFlow<List<SpotifyChapter>> = _detailChapters
 
     private val _detailError = MutableStateFlow<String?>(null)
     val detailError: StateFlow<String?> = _detailError.asStateFlow()
@@ -551,6 +558,7 @@ class SpotifyViewModel(
             is Screen.AlbumDetail -> loadAlbumTracks(screen.id)
             is Screen.ArtistDetail -> loadArtistDetail(screen.id)
             is Screen.PodcastDetail -> loadShowEpisodes(screen.id)
+            is Screen.AudiobookDetail -> loadAudiobookChapters(screen.id)
             is Screen.Queue -> loadQueue()
             is Screen.Settings -> loadDevices()
             is Screen.HomeLayoutSettings -> Unit
@@ -816,6 +824,7 @@ class SpotifyViewModel(
                     launch { loadPlaylists() }
                     launch { loadSavedAlbums() }
                     launch { loadSavedShows() }
+                    launch { loadSavedAudiobooks() }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error loading library: ${e.message}", e)
@@ -1054,6 +1063,46 @@ class SpotifyViewModel(
         }
     }
 
+    private suspend fun loadSavedAudiobooks() = withContext(Dispatchers.IO) {
+        if (_savedAudiobooks.value.isNotEmpty()) return@withContext
+        // Seed UI from cache
+        val cached = libraryRepository.getCachedAudiobooks()
+        if (cached.isNotEmpty()) {
+            _savedAudiobooks.value = cached
+            Log.d(TAG, "Preloaded ${cached.size} audiobooks from cache")
+        }
+        try {
+            val fresh = libraryRepository.refreshSavedAudiobooks()
+            _savedAudiobooks.value = fresh
+            _isOffline.value = false
+            prefetchImages(fresh.map { bestArtwork(it.images) })
+        } catch (e: Exception) {
+            handleApiFailure(e)
+            Log.e(TAG, "Failed to load saved audiobooks: ${e.message}")
+        }
+    }
+
+    fun loadAudiobookChapters(audiobookId: String) {
+        if (audiobookId.isBlank()) return
+        viewModelScope.launch {
+            _isDetailLoading.value = true
+            _detailChapters.value = emptyList()
+            _detailError.value = null
+            try {
+                val chapters = withContext(Dispatchers.IO) {
+                    libraryRepository.getAudiobookChapters(audiobookId)
+                }
+                _detailChapters.value = chapters
+            } catch (e: Exception) {
+                handleApiFailure(e)
+                Log.e(TAG, "Failed to load chapters for audiobook $audiobookId: ${e.message}")
+                _detailError.value = "Could not load chapters.\n${e.message}"
+            } finally {
+                _isDetailLoading.value = false
+            }
+        }
+    }
+
     private fun refreshPodcastUpdates(shows: List<SpotifyShow>) {
         if (shows.isEmpty()) {
             _podcastUpdates.value = emptyMap()
@@ -1141,11 +1190,23 @@ class SpotifyViewModel(
                 _isOffline.value = false
             } catch (e: Exception) {
                 if (e is retrofit2.HttpException && e.code() == 403) {
-                    // 403 = token lacks playlist-read-collaborative (or playlist-read-private) scope.
-                    // This commonly happens if the profile was created before these scopes were added.
-                    // The user must use "Refresh Permissions" in Settings to re-consent with the updated scope list.
-                    Log.w(TAG, "403 Forbidden loading playlist $playlistId — likely missing playlist scope. Advising user to refresh permissions.")
-                    _detailError.value = "Tracks unavailable (missing Spotify permission).\n\nGo to Settings → Manage Profiles → Refresh Permissions to grant access to this playlist type."
+                    // 403 = Spotify denied the tracks request. Possible causes:
+                    // 1) Token lacks playlist-read-private / playlist-read-collaborative scope.
+                    //    → Use Settings → Manage Profiles → Refresh Permissions, then restart the app.
+                    // 2) Spotify Developer-mode quota: the playlist owner is not registered in
+                    //    your Spotify app's user list (25-user dev-mode cap).
+                    //    → Add the owner to your app at developer.spotify.com → Users & Access,
+                    //      or apply for Extended Quota Mode.
+                    // 3) The playlist is Spotify-curated (editorial) — these are blocked for dev apps.
+                    Log.w(TAG, "403 Forbidden loading playlist $playlistId — scope or dev-mode quota restriction.")
+                    _detailError.value = buildString {
+                        appendLine("Spotify returned 403 — playlist access denied.")
+                        appendLine()
+                        appendLine("Common causes:")
+                        appendLine("• You have a collaborative/private playlist and your token is missing the required scope. If you haven't done so since updating, use Settings → Manage Profiles → Refresh Permissions, then restart the app.")
+                        appendLine("• Developer-mode 25-user cap: the playlist owner must be added to your Spotify App at developer.spotify.com → Users & Access.")
+                        append("• Spotify editorial/curated playlists are blocked for developer apps.")
+                    }
                 } else if (e is GlobalRateLimitException) {
                     _detailError.value = buildRateLimitMessage(e.lockedUntilEpochMs)
                 } else {
@@ -1829,8 +1890,10 @@ class SpotifyViewModel(
         _playlists.value = emptyList()
         _savedAlbums.value = emptyList()
         _savedShows.value = emptyList()
+        _savedAudiobooks.value = emptyList()
         _detailTracks.value = emptyList()
         _detailEpisodes.value = emptyList()
+        _detailChapters.value = emptyList()
         _detailError.value = null
         _queue.value = emptyList()
         _followedArtists.value = emptyList()

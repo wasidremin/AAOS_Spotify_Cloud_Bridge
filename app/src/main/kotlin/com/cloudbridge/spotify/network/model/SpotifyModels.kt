@@ -181,12 +181,54 @@ data class SpotifyAudiobook(
     @Json(name = "uri") val uri: String,
     @Json(name = "authors") val authors: List<SpotifyAuthor>? = null,
     @Json(name = "publisher") val publisher: String? = null,
-    @Json(name = "images") val images: List<SpotifyImage>? = null
+    @Json(name = "images") val images: List<SpotifyImage>? = null,
+    @Json(name = "description") val description: String? = null,
+    @Json(name = "total_chapters") val totalChapters: Int? = null
 )
 
 @JsonClass(generateAdapter = true)
 data class SpotifyAuthor(
     @Json(name = "name") val name: String
+)
+
+// ─── Audiobooks ──────────────────────────────────────────────────────
+
+@JsonClass(generateAdapter = true)
+data class SavedAudiobooksResponse(
+    @Json(name = "items") val items: List<SpotifyAudiobook?>,
+    @Json(name = "total") val total: Int,
+    @Json(name = "limit") val limit: Int,
+    @Json(name = "offset") val offset: Int,
+    @Json(name = "next") val next: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AudiobookChaptersResponse(
+    @Json(name = "items") val items: List<SpotifyChapter?>,
+    @Json(name = "total") val total: Int,
+    @Json(name = "limit") val limit: Int,
+    @Json(name = "offset") val offset: Int,
+    @Json(name = "next") val next: String? = null
+)
+
+/**
+ * A single audiobook chapter — analogous to [SpotifyEpisode] for podcasts.
+ *
+ * The `audiobook` field is a lightweight back-reference returned by some
+ * Spotify endpoints. It may be null when chapters are fetched without the
+ * parent audiobook object.
+ */
+@JsonClass(generateAdapter = true)
+data class SpotifyChapter(
+    @Json(name = "id") val id: String,
+    @Json(name = "name") val name: String,
+    @Json(name = "uri") val uri: String,
+    @Json(name = "chapter_number") val chapterNumber: Int = 0,
+    @Json(name = "duration_ms") val durationMs: Long = 0,
+    @Json(name = "images") val images: List<SpotifyImage>? = null,
+    @Json(name = "description") val description: String? = null,
+    @Json(name = "resume_point") val resumePoint: ResumePoint? = null,
+    @Json(name = "audiobook") val audiobook: SpotifyAudiobook? = null
 )
 
 // ─── Recently Played ─────────────────────────────────────────────────

@@ -211,7 +211,8 @@ private fun CloudBridgeApp(
                                 currentScreen is SpotifyViewModel.Screen.PlaylistDetail ||
                                 currentScreen is SpotifyViewModel.Screen.AlbumDetail ||
                                 currentScreen is SpotifyViewModel.Screen.ArtistDetail ||
-                                currentScreen is SpotifyViewModel.Screen.PodcastDetail
+                                currentScreen is SpotifyViewModel.Screen.PodcastDetail ||
+                                currentScreen is SpotifyViewModel.Screen.AudiobookDetail
                         NavItem.Queue -> currentScreen is SpotifyViewModel.Screen.Queue
                         NavItem.Settings -> currentScreen is SpotifyViewModel.Screen.Settings ||
                             currentScreen is SpotifyViewModel.Screen.HomeLayoutSettings ||
@@ -311,6 +312,7 @@ private fun CloudBridgeApp(
                             )
                             is SpotifyViewModel.Screen.ArtistDetail -> ArtistDetailScreen(viewModel, screen, innerPadding)
                             is SpotifyViewModel.Screen.PodcastDetail -> PodcastDetailScreen(viewModel, screen, innerPadding)
+                            is SpotifyViewModel.Screen.AudiobookDetail -> AudiobookDetailScreen(viewModel, screen, innerPadding)
                             is SpotifyViewModel.Screen.Queue -> QueueScreen(viewModel, innerPadding)
                             is SpotifyViewModel.Screen.Settings -> SettingsScreen(viewModel, innerPadding)
                             is SpotifyViewModel.Screen.HomeLayoutSettings -> HomeLayoutSettingsScreen(viewModel, innerPadding)
