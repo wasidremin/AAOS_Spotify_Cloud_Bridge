@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <SpotifyOAuthConfig>
-  <ClientId>1a979df868544bcd8c69fd27492c0cb0</ClientId>
-  <ClientSecret>78731cc4af5c42e7a2609f1419655490</ClientSecret>
+  <ClientId>Add Your Own</ClientId>
+  <ClientSecret>Add Your Own</ClientSecret>
   <RedirectUri>http://127.0.0.1:8888/callback</RedirectUri>
   <Scopes>
     playlist-read-private
