@@ -392,7 +392,7 @@ class SpotifyViewModel(
     val rateLimitUntilEpochMs: StateFlow<Long> = _rateLimitUntilEpochMs.asStateFlow()
 
     private var hasDismissedReauthThisSession = false
-    private var lastSavedStatusTrackId: String? = null
+    private var lastSavedStatusTrackUri: String? = null
     private var lastSavedStatusCheckedAtMs: Long = 0L
     private var lastSuccessfulPlaybackSyncAtMs: Long = 0L
 
@@ -569,7 +569,7 @@ class SpotifyViewModel(
 
     fun openNowPlaying() {
         _showNowPlaying.value = true
-        lastSavedStatusTrackId = null
+        lastSavedStatusTrackUri = null
         lastSavedStatusCheckedAtMs = 0L
         refreshPlaybackStateNow()
     }
@@ -952,7 +952,7 @@ class SpotifyViewModel(
             .sortedWith(
                 compareByDescending<SpotifyPlaylist> { !it.description.isNullOrBlank() }
                     .thenByDescending { it.images?.isNotEmpty() == true }
-                    .thenByDescending { it.tracks?.total ?: 0 }
+                    .thenByDescending { it.itemCount }
                     .thenBy { it.name.orEmpty().lowercase() }
             )
             .take(limit)
@@ -978,7 +978,7 @@ class SpotifyViewModel(
     }
 
     /**
-     * "New Releases" — replaces the deprecated /browse/new-releases (403 for dev apps).
+    * "New Releases" — replaces the removed February 2026 `/v1/browse/new-releases` endpoint.
      * Fetches the user's top 5 short-term artists then collects 3–4 of their latest albums each,
      * giving a "new music from artists you listen to" feed without needing extended API access.
      *
@@ -1183,14 +1183,14 @@ class SpotifyViewModel(
             try {
                 var offset = 0
                 do {
-                    val page = api.getPlaylistTracks(playlistId, limit = 50, offset = offset)
+                    val page = api.getPlaylistItems(playlistId, limit = 50, offset = offset)
                     _detailTracks.update { current -> current + page.items.filterNotNull().mapNotNull { it.track } }
                     offset += 50
                 } while (page.next != null && offset < page.total)
                 _isOffline.value = false
             } catch (e: Exception) {
                 if (e is retrofit2.HttpException && e.code() == 403) {
-                    // 403 = Spotify denied the tracks request. Possible causes:
+                    // 403 = Spotify denied the items request. Possible causes:
                     // 1) Token lacks playlist-read-private / playlist-read-collaborative scope.
                     //    → Use Settings → Manage Profiles → Refresh Permissions, then restart the app.
                     // 2) Spotify Developer-mode quota: the playlist owner is not registered in
@@ -1198,14 +1198,17 @@ class SpotifyViewModel(
                     //    → Add the owner to your app at developer.spotify.com → Users & Access,
                     //      or apply for Extended Quota Mode.
                     // 3) The playlist is Spotify-curated (editorial) — these are blocked for dev apps.
-                    Log.w(TAG, "403 Forbidden loading playlist $playlistId — scope or dev-mode quota restriction.")
+                    // 4) Stale APK calling a removed endpoint (e.g. /tracks instead of /items).
+                    //    → Rebuild and reinstall the latest APK.
+                    Log.w(TAG, "403 Forbidden loading playlist $playlistId — possible causes: missing scope, dev-mode quota, curated playlist, or removed API endpoint.")
                     _detailError.value = buildString {
                         appendLine("Spotify returned 403 — playlist access denied.")
                         appendLine()
                         appendLine("Common causes:")
-                        appendLine("• You have a collaborative/private playlist and your token is missing the required scope. If you haven't done so since updating, use Settings → Manage Profiles → Refresh Permissions, then restart the app.")
+                        appendLine("• Missing scope: use Settings → Manage Profiles → Refresh Permissions, then restart the app.")
                         appendLine("• Developer-mode 25-user cap: the playlist owner must be added to your Spotify App at developer.spotify.com → Users & Access.")
-                        append("• Spotify editorial/curated playlists are blocked for developer apps.")
+                        appendLine("• Spotify editorial/curated playlists are blocked for developer apps.")
+                        append("• Stale build calling a removed endpoint — reinstall the latest APK.")
                     }
                 } else if (e is GlobalRateLimitException) {
                     _detailError.value = buildRateLimitMessage(e.lockedUntilEpochMs)
@@ -1500,16 +1503,16 @@ class SpotifyViewModel(
 
     fun toggleSaveTrack() {
         viewModelScope.launch(Dispatchers.IO) {
-            val trackId = _playbackState.value?.item?.id ?: return@launch
+            val trackUri = _playbackState.value?.item?.uri ?: return@launch
             try {
                 if (_isTrackSaved.value) {
-                    api.removeTracks(ids = trackId)
+                    api.removeLibraryItems(uris = trackUri)
                     _isTrackSaved.value = false
                 } else {
-                    api.saveTracks(ids = trackId)
+                    api.saveLibraryItems(uris = trackUri)
                     _isTrackSaved.value = true
                 }
-                lastSavedStatusTrackId = null
+                lastSavedStatusTrackUri = null
                 lastSavedStatusCheckedAtMs = 0L
             } catch (e: Exception) {
                 Log.e(TAG, "Toggle save failed: ${e.message}")
@@ -1743,15 +1746,15 @@ class SpotifyViewModel(
                 }
 
                 if (playback.item?.type == "track") {
-                    playback.item.id?.let { trackId ->
+                    playback.item.uri?.let { trackUri ->
                         refreshSavedTrackStatus(
-                            trackId = trackId,
+                            trackUri = trackUri,
                             force = playbackItemChanged || _showNowPlaying.value
                         )
                     }
                 } else {
                     _isTrackSaved.value = false
-                    lastSavedStatusTrackId = null
+                    lastSavedStatusTrackUri = null
                     lastSavedStatusCheckedAtMs = 0L
                 }
             } else {
@@ -1908,7 +1911,7 @@ class SpotifyViewModel(
         _isOffline.value = false
         _requiresReauth.value = false
         _showNowPlaying.value = false
-        lastSavedStatusTrackId = null
+        lastSavedStatusTrackUri = null
         libraryTab = 0
     }
 
@@ -1960,18 +1963,22 @@ class SpotifyViewModel(
 
             try {
                 supervisorScope {
-                    // Fetch full artist profile for the header image
-                    launch {
+                    val artistProfileDeferred = async {
                         try {
-                            _currentArtistProfile.value = api.getArtist(artistId)
+                            api.getArtist(artistId)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to load artist profile: ${e.message}")
+                            null
                         }
+                    }
+                    // Fetch full artist profile for the header image.
+                    launch {
+                        artistProfileDeferred.await()?.let { _currentArtistProfile.value = it }
                     }
                     launch {
                         try {
-                            val topTracks = api.getArtistTopTracks(artistId)
-                            _artistTopTracks.value = topTracks.tracks
+                            val artistName = artistProfileDeferred.await()?.name
+                            _artistTopTracks.value = loadArtistTopTracks(artistId, artistName)
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to load artist top tracks: ${e.message}")
                         }
@@ -1993,6 +2000,35 @@ class SpotifyViewModel(
             } finally {
                 _isDetailLoading.value = false
             }
+        }
+    }
+
+    /**
+     * Spotify removed `GET /v1/artists/{id}/top-tracks` in February 2026.
+     * We now approximate the same section by searching the catalog for tracks
+     * matching the artist name, then filtering the results back to the target artist.
+     */
+    private suspend fun loadArtistTopTracks(artistId: String, artistName: String?): List<SpotifyTrack> {
+        val safeArtistName = artistName?.trim().orEmpty()
+        if (safeArtistName.isBlank()) return emptyList()
+
+        return try {
+            api.search(
+                query = "artist:$safeArtistName",
+                type = "track",
+                limit = 10
+            ).tracks?.items
+                .orEmpty()
+                .filterNotNull()
+                .filter { track ->
+                    track.artists.any { artist ->
+                        artist.id == artistId || artist.name.equals(safeArtistName, ignoreCase = true)
+                    }
+                }
+                .distinctBy { it.uri }
+        } catch (e: Exception) {
+            handleApiFailure(e)
+            emptyList()
         }
     }
 
@@ -2141,7 +2177,7 @@ class SpotifyViewModel(
         var offset = 0
         try {
             do {
-                val page = api.getPlaylistTracks(playlistId, limit = 50, offset = offset)
+                val page = api.getPlaylistItems(playlistId, limit = 50, offset = offset)
                 tracks += page.items.filterNotNull().mapNotNull { it.track }
                 offset += 50
             } while (page.next != null && offset < page.total && tracks.size < MAX_QUEUE_BATCH)
@@ -2169,16 +2205,16 @@ class SpotifyViewModel(
     private suspend fun resolveTrackUrisForPlayback(tracks: List<SpotifyTrack>): List<String> =
         tracks.take(100).map { libraryRepository.resolvePlaybackUri(it, _explicitFilterEnabled.value) }
 
-    private suspend fun refreshSavedTrackStatus(trackId: String, force: Boolean = false) {
+    private suspend fun refreshSavedTrackStatus(trackUri: String, force: Boolean = false) {
         val now = System.currentTimeMillis()
-        val recentlyChecked = trackId == lastSavedStatusTrackId &&
+        val recentlyChecked = trackUri == lastSavedStatusTrackUri &&
             (now - lastSavedStatusCheckedAtMs) < SAVED_STATUS_REFRESH_MS
         if (!force && recentlyChecked) return
 
-        lastSavedStatusTrackId = trackId
+        lastSavedStatusTrackUri = trackUri
         lastSavedStatusCheckedAtMs = now
         try {
-            val savedList = api.checkSavedTracks(ids = trackId)
+            val savedList = api.checkSavedLibraryItems(uris = trackUri)
             _isTrackSaved.value = savedList.firstOrNull() ?: false
         } catch (_: Exception) {
             // Non-critical UI sync.
@@ -2245,7 +2281,7 @@ class SpotifyViewModel(
             id = playlist.id,
             name = playlist.name ?: "Unknown Playlist",
             uri = playlist.uri,
-            subtitle = "${playlist.tracks?.total ?: 0} tracks",
+            subtitle = "${playlist.itemCount} tracks",
             imageUrl = bestArtwork(playlist.images),
             type = "playlist"
         )

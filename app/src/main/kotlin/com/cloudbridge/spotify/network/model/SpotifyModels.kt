@@ -35,8 +35,12 @@ data class SpotifyPlaylist(
     @Json(name = "images") val images: List<SpotifyImage>? = null,
     @Json(name = "uri") val uri: String?,
     @Json(name = "tracks") val tracks: PlaylistTracksRef? = null,
+    @Json(name = "items") val itemsRef: PlaylistTracksRef? = null,
     @Json(name = "owner") val owner: SpotifyPlaylistOwner? = null
-)
+) {
+    val itemCount: Int
+        get() = itemsRef?.total ?: tracks?.total ?: 0
+}
 
 @JsonClass(generateAdapter = true)
 data class SpotifyPlaylistOwner(
@@ -53,8 +57,8 @@ data class PlaylistTracksRef(
 // ─── Tracks ──────────────────────────────────────────────────────────
 
 @JsonClass(generateAdapter = true)
-data class PlaylistTracksResponse(
-    @Json(name = "items") val items: List<PlaylistTrackItem?>,
+data class PlaylistItemsResponse(
+    @Json(name = "items") val items: List<PlaylistItem?>,
     @Json(name = "total") val total: Int,
     @Json(name = "limit") val limit: Int,
     @Json(name = "offset") val offset: Int,
@@ -62,9 +66,13 @@ data class PlaylistTracksResponse(
 )
 
 @JsonClass(generateAdapter = true)
-data class PlaylistTrackItem(
-    @Json(name = "track") val track: SpotifyTrack?
-)
+data class PlaylistItem(
+    @Json(name = "item") val item: SpotifyPlayableItem? = null,
+    @Json(name = "track") val legacyTrack: SpotifyTrack? = null
+) {
+    val track: SpotifyTrack?
+        get() = legacyTrack ?: item?.toSpotifyTrackOrNull()
+}
 
 @JsonClass(generateAdapter = true)
 data class SpotifyTrack(
@@ -518,3 +526,16 @@ data class ResumePoint(
     @Json(name = "fully_played") val fullyPlayed: Boolean,
     @Json(name = "resume_position_ms") val resumePositionMs: Long
 )
+
+private fun SpotifyPlayableItem.toSpotifyTrackOrNull(): SpotifyTrack? {
+    if (type != "track") return null
+    return SpotifyTrack(
+        id = id,
+        name = name,
+        uri = uri,
+        durationMs = durationMs,
+        artists = artists ?: emptyList(),
+        album = album,
+        explicit = explicit
+    )
+}

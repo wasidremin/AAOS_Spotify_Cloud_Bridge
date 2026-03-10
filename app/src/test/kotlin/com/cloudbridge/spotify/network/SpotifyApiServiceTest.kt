@@ -21,8 +21,8 @@ import retrofit2.converter.moshi.MoshiConverterFactory
  * call, and asserts both the parsed model and the outgoing HTTP
  * request (method, path, body).
  *
- * Covers: getPlaylists, getPlaylistTracks, getDevices, play,
- * pause, next, previous, and getCurrentPlayback.
+ * Covers: getPlaylists, getPlaylistItems, generic library save/remove/contains,
+ * getDevices, play, pause, next, previous, and getCurrentPlayback.
  */
 class SpotifyApiServiceTest {
 
@@ -63,7 +63,7 @@ class SpotifyApiServiceTest {
                             "description": "A test playlist",
                             "uri": "spotify:playlist:playlist_1",
                             "images": [{"url": "https://img.spotify.com/1.jpg", "width": 300, "height": 300}],
-                            "tracks": {"total": 50}
+                            "items": {"total": 50}
                         }
                     ],
                     "total": 1,
@@ -80,7 +80,7 @@ class SpotifyApiServiceTest {
         assertEquals("playlist_1", body.items[0]!!.id)
         assertEquals("My Playlist", body.items[0]!!.name)
         assertEquals("spotify:playlist:playlist_1", body.items[0]!!.uri)
-        assertEquals(50, body.items[0]!!.tracks?.total)
+        assertEquals(50, body.items[0]!!.itemCount)
 
         val request = server.takeRequest()
         assertEquals("GET", request.method)
@@ -89,16 +89,17 @@ class SpotifyApiServiceTest {
     }
 
     @Test
-    fun `getPlaylistTracks returns track items`() = runTest {
+    fun `getPlaylistItems returns track items`() = runTest {
         server.enqueue(
             MockResponse().setResponseCode(200).setBody("""
                 {
                     "items": [
                         {
-                            "track": {
+                            "item": {
                                 "id": "track_1",
                                 "name": "Test Song",
                                 "uri": "spotify:track:track_1",
+                                "type": "track",
                                 "duration_ms": 210000,
                                 "artists": [{"id": "artist_1", "name": "Test Artist"}],
                                 "album": {
@@ -117,7 +118,7 @@ class SpotifyApiServiceTest {
             """.trimIndent())
         )
 
-        val body = apiService.getPlaylistTracks(
+        val body = apiService.getPlaylistItems(
             playlistId = "playlist_1",
             limit = 50,
             offset = 0
@@ -130,6 +131,10 @@ class SpotifyApiServiceTest {
         assertEquals("Test Song", track.name)
         assertEquals(210000L, track.durationMs)
         assertEquals("Test Artist", track.artists.first().name)
+
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertTrue(request.path!!.contains("/v1/playlists/playlist_1/items"))
     }
 
     @Test
@@ -295,6 +300,10 @@ class SpotifyApiServiceTest {
         assertEquals(45000L, playback.progressMs)
         assertEquals("Now Playing Song", playback.item?.name)
         assertEquals("Active Artist", playback.item?.artists?.first()?.name)
+
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertTrue(request.path!!.contains("additional_types=episode") && !request.path!!.contains("chapter"))
     }
 
     @Test
@@ -338,5 +347,33 @@ class SpotifyApiServiceTest {
         assertEquals("chapter", playback.item?.type)
         assertEquals("Road Trip Stories", playback.item?.audiobook?.name)
         assertEquals("A. Writer", playback.item?.audiobook?.authors?.first()?.name)
+    }
+
+    @Test
+    fun `library save remove and contains use generic me library endpoint`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(204))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("[true]"))
+
+        val saveResponse = apiService.saveLibraryItems("spotify:track:track_1")
+        val removeResponse = apiService.removeLibraryItems("spotify:track:track_1")
+        val containsResponse = apiService.checkSavedLibraryItems("spotify:track:track_1")
+
+        assertTrue(saveResponse.isSuccessful)
+        assertTrue(removeResponse.isSuccessful)
+        assertEquals(listOf(true), containsResponse)
+
+        val saveRequest = server.takeRequest()
+        assertEquals("PUT", saveRequest.method)
+        assertTrue(saveRequest.path!!.contains("/v1/me/library"))
+        assertTrue(saveRequest.path!!.contains("uris=spotify%3Atrack%3Atrack_1") || saveRequest.path!!.contains("uris=spotify:track:track_1"))
+
+        val removeRequest = server.takeRequest()
+        assertEquals("DELETE", removeRequest.method)
+        assertTrue(removeRequest.path!!.contains("/v1/me/library"))
+
+        val containsRequest = server.takeRequest()
+        assertEquals("GET", containsRequest.method)
+        assertTrue(containsRequest.path!!.contains("/v1/me/library/contains"))
     }
 }

@@ -471,7 +471,7 @@ private fun PlaylistTile(
     AlbumArtTile(
         imageUrl = viewModel.bestArtwork(playlist.images),
         title = playlist.name ?: "Unknown Playlist",
-        subtitle = "${playlist.tracks?.total ?: 0} tracks",
+        subtitle = "${playlist.itemCount} tracks",
         isPinned = isPinned,
         onClick = {
             val playlistUri = playlist.uri ?: return@AlbumArtTile

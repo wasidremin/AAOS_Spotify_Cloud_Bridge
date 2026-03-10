@@ -21,7 +21,7 @@
 |-----------|--------|---------------|
 | `TokenManagerTest` | auth | Active-profile selection, Room-backed credential lifecycle, token validity, Clean Swapper preference persistence, and rate-limit lockout persistence |
 | `SpotifyAuthServiceTest` | network | Token refresh with Basic auth header, 401 error handling |
-| `SpotifyApiServiceTest` | network | All API endpoints (playlists, tracks, devices, playback, queue), including explicit-track and audiobook-chapter payload parsing |
+| `SpotifyApiServiceTest` | network | Playlist items, generic library save/check/remove endpoints, devices, playback, queue, and explicit-track/audiobook-chapter payload parsing |
 | `DeviceManagerTest` | player | Smartphone priority selection, caching, refresh, error handling |
 | `CustomMixEngineTest` | domain | Daily Drive / decade mix generation rules, ordering, and deduplication |
 
@@ -103,7 +103,7 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 
 #### TC-02: NavigationRail Navigation
 1. Tap the **Library** icon in the left NavigationRail
-2. **Expected**: Library screen shows with Playlists/Albums/Podcasts tabs
+2. **Expected**: Library screen shows with Playlists/Albums/Artists/Podcasts/Audiobooks tabs
 3. Tap **Queue** icon
 4. **Expected**: Queue screen shows current track and upcoming items
 5. Tap **Home** icon
@@ -135,6 +135,19 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 3. **Expected**: Playlist detail screen shows track list with numbers and durations
 4. Tap "Play All" button
 5. **Expected**: First track starts playing
+
+#### TC-04E: Playlist Track Queue Button
+1. Navigate to **Library → Playlists** and open any playlist
+2. Tap the visible queue icon on an individual track row
+3. **Expected**: The song is added to the phone's Spotify queue without requiring a long-press gesture
+
+#### TC-04F: Audiobook Library and Chapter Detail
+1. Open **Library → Audiobooks** with a Spotify account that has at least one saved audiobook
+2. **Expected**: Audiobooks render in both grid and list modes with working filter/sort controls
+3. Tap an audiobook
+4. **Expected**: The audiobook detail screen shows chapter rows with chapter numbers, duration text, and progress bars for partially played chapters
+5. Tap a chapter
+6. **Expected**: Playback starts on the phone and Queue / Now Playing display the chapter metadata correctly
 
 #### TC-04C: Newly Added Playlists Refresh
 1. Add or follow a playlist on the Spotify account from another device

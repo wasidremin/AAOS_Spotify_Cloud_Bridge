@@ -59,8 +59,7 @@ private enum class ArtistSortOption(val label: String) {
 
 private enum class ShowSortOption(val label: String) {
     RecentlyAdded("Recently Added"),
-    Alphabetical("Alphabetical"),
-    Publisher("Publisher")
+    Alphabetical("Alphabetical")
 }
 
 private enum class AudiobookSortOption(val label: String) {
@@ -313,7 +312,7 @@ private fun PlaylistList(
                     AlbumArtTile(
                         imageUrl = viewModel.bestArtwork(playlist.images),
                         title = playlist.name ?: "Unknown Playlist",
-                        subtitle = "${playlist.tracks?.total ?: 0} tracks",
+                        subtitle = "${playlist.itemCount} tracks",
                         isPinned = (playlist.uri ?: "") in pinnedUris,
                         contextActions = listOf(
                             ContextMenuAction("Add to queue") { playlist.id?.let(viewModel::addPlaylistToQueue) },
@@ -374,7 +373,7 @@ private fun PlaylistList(
                     LibraryRow(
                         imageUrl = viewModel.bestArtwork(playlist.images),
                         title = playlist.name ?: "Unknown Playlist",
-                        subtitle = "${playlist.tracks?.total ?: 0} tracks",
+                        subtitle = "${playlist.itemCount} tracks",
                         isPinned = (playlist.uri ?: "") in pinnedUris,
                         contextActions = listOf(
                             ContextMenuAction("Add to queue") { playlist.id?.let(viewModel::addPlaylistToQueue) },
@@ -687,19 +686,12 @@ private fun ShowList(
             .filter { show ->
                 query.isBlank() ||
                     show.name.contains(query, ignoreCase = true) ||
-                    (show.publisher?.contains(query, ignoreCase = true) == true) ||
                     (show.description?.contains(query, ignoreCase = true) == true)
             }
             .let { matches ->
                 when (sortOption) {
                     ShowSortOption.RecentlyAdded -> matches
                     ShowSortOption.Alphabetical -> matches.sortedBy { it.name.lowercase() }
-                    ShowSortOption.Publisher -> matches.sortedWith(
-                        compareBy<SpotifyShow>(
-                            { (it.publisher ?: "Podcast").lowercase() },
-                            { it.name.lowercase() }
-                        )
-                    )
                 }
             }
     }
@@ -797,8 +789,7 @@ private fun AudiobookList(
             .filter { book ->
                 query.isBlank() ||
                     book.name.contains(query, ignoreCase = true) ||
-                    book.authors?.any { it.name.contains(query, ignoreCase = true) } == true ||
-                    (book.publisher?.contains(query, ignoreCase = true) == true)
+                    book.authors?.any { it.name.contains(query, ignoreCase = true) } == true
             }
             .let { matches ->
                 when (sortOption) {

@@ -26,12 +26,12 @@ interface SpotifyApiService {
         @Query("offset") offset: Int = 0
     ): PlaylistsResponse
 
-    @GET("v1/playlists/{id}/tracks")
-    suspend fun getPlaylistTracks(
+    @GET("v1/playlists/{id}/items")
+    suspend fun getPlaylistItems(
         @Path("id") playlistId: String,
         @Query("limit") limit: Int = 50,
         @Query("offset") offset: Int = 0
-    ): PlaylistTracksResponse
+    ): PlaylistItemsResponse
 
     @GET("v1/playlists/{id}")
     suspend fun getPlaylist(
@@ -130,13 +130,6 @@ interface SpotifyApiService {
         @Query("after") after: String? = null
     ): FollowedArtistsResponse
 
-    /** Artist's top tracks */
-    @GET("v1/artists/{id}/top-tracks")
-    suspend fun getArtistTopTracks(
-        @Path("id") artistId: String,
-        @Query("market") market: String = "US"
-    ): ArtistTopTracksResponse
-
     @GET("v1/artists/{id}")
     suspend fun getArtist(
         @Path("id") artistId: String
@@ -157,17 +150,11 @@ interface SpotifyApiService {
         @Query("time_range") timeRange: String = "medium_term"
     ): TopTracksResponse
 
-    /** New album releases — powers "New Releases" section */
-    @GET("v1/browse/new-releases")
-    suspend fun getNewReleases(
-        @Query("limit") limit: Int = 20
-    ): NewReleasesResponse
-
     @GET("v1/search")
     suspend fun search(
         @Query("q") query: String,
         @Query("type", encoded = true) type: String = "track,album,playlist",
-        @Query("limit") limit: Int = 20
+        @Query("limit") limit: Int = 5
     ): SearchResponse
 
     @GET("v1/recommendations")
@@ -175,19 +162,6 @@ interface SpotifyApiService {
         @Query("limit") limit: Int = 50,
         @Query("seed_tracks", encoded = true) seedTracks: String
     ): RecommendationsResponse
-
-    /** Browse categories — powers "Browse" tab */
-    @GET("v1/browse/categories")
-    suspend fun getCategories(
-        @Query("limit") limit: Int = 50
-    ): CategoriesResponse
-
-    /** Playlists for a specific browse category */
-    @GET("v1/browse/categories/{id}/playlists")
-    suspend fun getCategoryPlaylists(
-        @Path("id") categoryId: String,
-        @Query("limit") limit: Int = 20
-    ): FeaturedPlaylistsResponse
 
     // ── Device Discovery ─────────────────────────────────────────────
 
@@ -270,7 +244,7 @@ interface SpotifyApiService {
      */
     @GET("v1/me/player")
     suspend fun getCurrentPlayback(
-        @Query("additional_types") additionalTypes: String = "episode,chapter"
+        @Query("additional_types") additionalTypes: String = "episode"
     ): Response<CurrentPlaybackResponse>
 
     // ── Queue Management ─────────────────────────────────────────────
@@ -288,21 +262,21 @@ interface SpotifyApiService {
 
     // ── Library — Save / Remove Tracks ───────────────────────────────
 
-    /** Save (heart) one or more tracks. Requires user-library-modify scope. */
-    @PUT("v1/me/tracks")
-    suspend fun saveTracks(
-        @Query("ids") ids: String   // comma-separated track IDs
+    /** Save one or more Spotify URIs to the user's library. */
+    @PUT("v1/me/library")
+    suspend fun saveLibraryItems(
+        @Query("uris", encoded = true) uris: String
     ): Response<Unit>
 
-    /** Un-save (un-heart) one or more tracks. Requires user-library-modify scope. */
-    @DELETE("v1/me/tracks")
-    suspend fun removeTracks(
-        @Query("ids") ids: String
+    /** Remove one or more Spotify URIs from the user's library. */
+    @DELETE("v1/me/library")
+    suspend fun removeLibraryItems(
+        @Query("uris", encoded = true) uris: String
     ): Response<Unit>
 
-    /** Check if one or more tracks are saved in the user's library. */
-    @GET("v1/me/tracks/contains")
-    suspend fun checkSavedTracks(
-        @Query("ids") ids: String   // comma-separated track IDs
+    /** Check if one or more Spotify URIs are saved in the user's library. */
+    @GET("v1/me/library/contains")
+    suspend fun checkSavedLibraryItems(
+        @Query("uris", encoded = true) uris: String
     ): List<Boolean>
 }

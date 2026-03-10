@@ -13,7 +13,8 @@
 │  │          │  ┌──────────────────────────────────────────┐│ │
 │  │ Home     │  │    HomeScreen (LazyVerticalGrid)         ││ │
 │  │ Search   │  │    SearchScreen (query + result grid)     ││ │
-│  │ Library  │  │    LibraryScreen (Playlists/Albums/Pods) ││ │
+│  │ Library  │  │    LibraryScreen (Playlists/Albums/      ││ │
+│  │          │  │                  Artists/Pods/Books)      ││ │
 │  │ Queue    │  │    NowPlayingScreen (blur + controls)    ││ │
 │  │ Settings │  │    QueueScreen (swipe-to-dismiss)        ││ │
 │  │          │  └──────────────────────────────────────────┘│ │
@@ -100,7 +101,7 @@ com.cloudbridge.spotify
 │   ├── screens/
 │   │   ├── AddProfileScreen.kt         # Smart-TV-style QR onboarding screen
 │   │   ├── HomeScreen.kt               # LazyVerticalGrid with album art tiles + podcast freshness badges
-│   │   ├── LibraryScreen.kt            # Playlists/Albums/Podcasts tabs with grid/list + pinning
+│   │   ├── LibraryScreen.kt            # Playlists/Albums/Artists/Podcasts/Audiobooks tabs with grid/list + pinning
 │   │   ├── ManagePinsScreen.kt         # Pinned favorites reordering UI
 │   │   ├── PlaylistDetailScreen.kt     # Track list with Play All button
 │   │   ├── NowPlayingScreen.kt         # Blurred bg + hero art + controls
@@ -148,7 +149,7 @@ Primary `StateFlow`s exposed to Compose:
 | `customMixes` | Static ViewModel list + `CustomMixEngine` playback generation | Home custom mix tiles |
 | `featuredPlaylists` | Curated `GET /v1/me/playlists` selection with cache/pin/recent exclusions | Home screen tiles |
 | `topTracks` | `GET /v1/me/top/tracks` | Home screen tiles |
-| `newReleases` | `GET /v1/browse/new-releases` | Home screen tiles |
+| `newReleases` | `GET /v1/me/top/artists` → `GET /v1/artists/{id}/albums` | Home "New Releases from your artists" tiles |
 | `searchResults` | `GET /v1/search` | Search screen result grid |
 | `searchQuery` | UI text input | Search state |
 | `isSearchLoading` | Internal | Search spinner |
@@ -157,12 +158,14 @@ Primary `StateFlow`s exposed to Compose:
 | `playlists` | `GET /v1/me/playlists` (paginated) | Library tab |
 | `savedAlbums` | `GET /v1/me/albums` (paginated) | Library tab |
 | `savedShows` | `GET /v1/me/shows` (paginated) | Library tab + Home podcast cards |
+| `savedAudiobooks` | `GET /v1/me/audiobooks` (paginated) | Library audiobook tab |
 | `playbackState` | `GET /v1/me/player` (3s poll) | Now Playing + MiniPlayer |
 | `isOffline` | Metadata sync exception handling | Offline banner state |
 | `requiresReauth` | API 401/403 detection | Reconnect banner state |
-| `isTrackSaved` | `GET /v1/me/tracks/contains` | Heart button state |
+| `isTrackSaved` | `GET /v1/me/library/contains` | Heart button state |
 | `queue` | `GET /v1/me/player/queue` | Queue screen |
-| `detailTracks` | Playlist/Album tracks endpoint | Detail screen |
+| `detailTracks` | `GET /v1/playlists/{id}/items` + `GET /v1/albums/{id}/tracks` | Playlist/album detail screen |
+| `detailChapters` | `GET /v1/audiobooks/{id}/chapters` | Audiobook detail screen |
 | `isHomeLoading` | Internal | Home section spinner |
 | `isLibraryLoading` | Internal | Library section spinner |
 
@@ -199,7 +202,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 
 **Library refresh policy**: `loadLibrary()` no longer short-circuits once playlists are non-empty. The UI still preloads cached content immediately, but every Library entry triggers a background Spotify refresh so new playlists and saved media show up reliably.
 
-**Library sort/filter policy**: Library tabs perform filtering and sort-order changes entirely in Compose against the already-loaded in-memory lists. This keeps the feature responsive in-car and avoids extra Spotify API traffic while driving.
+**Library sort/filter policy**: Library tabs perform filtering and sort-order changes entirely in Compose against the already-loaded in-memory lists. This keeps the feature responsive in-car and avoids extra Spotify API traffic while driving. Audiobooks sort by recently added, alphabetical title, or author.
 
 **Custom mix generation policy**: Because Spotify-owned personalized playlists are no longer reliably accessible for this app, Home exposes a fixed set of generated mixes instead of cached Spotify playlist IDs. Decade mixes page liked songs from `GET /v1/me/tracks`, filter them by album release decade, seed up to five liked tracks into `GET /v1/recommendations`, and interleave owned plus recommended tracks in a 2:1 pattern before calling `SpotifyPlaybackController.play(uris = ...)`.
 
@@ -207,7 +210,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 
 **Clean Swapper policy**: When the explicit filter is enabled, direct URI playback paths resolve explicit tracks through `SpotifyLibraryRepository`. The repository checks Room for a cached explicit-to-clean mapping, falls back to a `GET /v1/search?type=track&limit=10` lookup when needed, and stores the replacement URI so later plays avoid repeat searches.
 
-**Playable metadata policy**: `SpotifyPlayableItem` now models Spotify `track`, `episode`, and `chapter` payloads so Queue, MiniPlayer, and Now Playing can render podcast and audiobook content without type-cast assumptions.
+**Playable metadata policy**: `SpotifyPlayableItem` now models Spotify `track`, `episode`, and `chapter` payloads so Queue, MiniPlayer, and Now Playing can render podcast and audiobook content without type-cast assumptions. Playlist detail loading now consumes Spotify's February 2026 `items.item` payload and maps track rows from that generic item container.
 
 **High-volume request audit**: The worst offenders were (1) metadata polling plus per-poll saved-track checks, (2) Home playlist suggestion loading forcing a full playlist refresh, and (3) recently played context hydration fanning out into per-item playlist/album fetches. The current architecture now caches or reuses in-memory results for those flows first, while leaving the podcast-freshness fan-out deliberately bounded because it powers a visible Home badge feature.
 
@@ -220,7 +223,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 - **Greeting + safety toggle**: Home renders a time-of-day greeting card with an always-visible Clean Swapper switch for family-safe playback.
 - **Tile geometry**: `AlbumArtTile` enforces square tiles (`aspectRatio(1f)`) with `ContentScale.Crop`.
 - **List touch targets**: detail rows use 64dp artwork with larger row padding, explicit badges, and current-track highlighting.
-- **Library tabs**: playlists/albums/podcasts can switch between 4-column grids and large list rows while preserving long-press pinning, and all Library tabs expose local sort/filter controls above the content.
+- **Library tabs**: playlists/albums/artists/podcasts/audiobooks can switch between 4-column grids and large list rows while preserving long-press pinning, and all Library tabs expose local sort/filter controls above the content.
 - **Insets**: Screen lists/grids consume `Scaffold` `innerPadding` to keep content above MiniPlayer.
 
 ### 3.4 OEM Window Constraints

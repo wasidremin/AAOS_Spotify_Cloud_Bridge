@@ -293,7 +293,7 @@ class SpotifyLibraryRepository(
             uri = safeUri,
             imageUrl = images?.firstOrNull()?.url,
             description = description,
-            trackCount = tracks?.total ?: 0
+            trackCount = itemCount
         )
     }
 

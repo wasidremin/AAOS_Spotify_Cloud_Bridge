@@ -124,13 +124,15 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Album tiles are forced square (`aspectRatio(1f)`) with `ContentScale.Crop` to avoid stretched artwork.
 - Album tiles include a `SpotifyCardSurface` fallback background so missing artwork still renders as a visible card.
 - Library and detail lists use larger touch targets (72dp and 64dp artwork rows) for safer in-car interaction.
-- Library Playlists, Albums, and Podcasts can each switch between large-tile grids and roomy list rows without losing long-press context actions.
-- Long-press on playlists and albums now opens a context menu with **Add to queue** plus **Pin/Unpin** actions; long-press on track and episode rows queues that specific item.
-- Library always refreshes playlists/albums/podcasts from Spotify when opened, while still seeding from cache first so newly added playlists appear without requiring an app reinstall.
+- Library Playlists, Albums, Podcasts, and Audiobooks can each switch between large-tile grids and roomy list rows without losing context actions.
+- Playlists now use Spotify's February 2026 `GET /v1/playlists/{id}/items` response shape, so playlist counts and detail rows stay compatible with the renamed `items` payload.
+- Playlists and albums still expose **Add to queue** from long-press menus, and playlist track rows now also show a visible one-tap queue button for safer in-car discovery.
+- Library always refreshes playlists/albums/podcasts/audiobooks from Spotify when opened, while still seeding from cache first so newly added media appears without requiring an app reinstall.
 - Library Playlists always shows an official "Liked Songs" tile first, backed by `GET /v1/me/tracks`.
 - Playlist sync is now hardened against malformed Spotify playlist payloads by allowing nullable playlist IDs/names/URIs in the network model and rejecting bad records before they hit the cache.
 - Library tab selection persists via `SpotifyViewModel.libraryTab`, so returning from detail screens keeps context.
-- Library tabs now support in-memory filtering plus local sort modes (for example alphabetical, creator/publisher, and recently added) without hitting Spotify again.
+- Library tabs now support in-memory filtering plus local sort modes (for example alphabetical, creator/author, and recently added) without hitting Spotify again.
+- Heart/save state now uses Spotify's generic library endpoints (`PUT/DELETE/GET /v1/me/library*`) instead of the removed track-specific save/check endpoints.
 - Settings now shows all stored Spotify profiles and provides an **Add profile with QR code** entry point.
 - Settings now also includes a **Refresh Permissions** action that reuses the active profile's saved developer app credentials, launches a lighter Spotify re-consent flow on the phone, and updates that same Room profile row in place when the new refresh token comes back.
 - Settings now includes a **Home screen order** editor so users can rearrange sections like Jump Back In, Podcasts, and New Releases.
@@ -145,7 +147,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Search uses a 750ms debounce and `imePadding()` so the on-screen keyboard does not obscure results.
 - Playlist/Artist detail rows show a speaker icon for the active track (not color-only), improving glanceability.
 - MiniPlayer width is responsive (`fillMaxWidth(0.55f)` with `widthIn(max = 600.dp)`) for split-screen resilience and increased to 112dp height with 88dp album art and 52dp play/pause icon for better automotive visibility.
-- Podcast episodes and audiobook chapters in Queue, Now Playing, and MiniPlayer use `SpotifyPlayableItem` with artwork fallback chain (item images → album/show/audiobook) and type-aware subtitle text.
+- Podcast episodes and audiobook chapters in Queue, Now Playing, and MiniPlayer use `SpotifyPlayableItem` with artwork fallback chain (item images → album/show/audiobook) and type-aware subtitle text, and Library now includes a dedicated Audiobooks tab plus chapter-detail screen.
 
 ## Runtime Resiliency
 

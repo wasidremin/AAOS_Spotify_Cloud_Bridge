@@ -430,7 +430,7 @@ Tapping a result navigates to the appropriate detail screen (playlist/album) or 
 
 #### Library Screen
 
-Tabbed interface with four tabs:
+Tabbed interface with five tabs:
 
 | Tab | Content | View Modes |
 |---|---|---|
@@ -438,6 +438,7 @@ Tabbed interface with four tabs:
 | Albums | Saved albums | 4-column grid |
 | Artists | Followed artists (circular images) | 4-column grid |
 | Podcasts | Saved shows | 4-column grid |
+| Audiobooks | Saved audiobooks | Grid (4-column) / List (toggle) |
 
 Each tab renders a local **Filter** field and **Sort** menu above the content. Sort changes are applied against the already loaded in-memory collections, so the user can quickly narrow a large library without extra Spotify API requests.
 
@@ -451,7 +452,7 @@ Displays details for a followed artist with three sections:
 
 | Section | Data Source |
 |---|---|
-| Top Tracks | `GET /v1/artists/{id}/top-tracks` |
+| Top Tracks | `GET /v1/search?type=track&limit=10&q=artist:<name>` filtered back to the target artist |
 | Albums | `GET /v1/artists/{id}/albums?limit=20` (horizontal scrollable row) |
 | Liked Songs | User's saved tracks filtered by artist ID (up to 200 tracks scanned) |
 
@@ -492,7 +493,7 @@ Displays the upcoming playback queue with a grid/list toggle:
   - Swiping reveals a red delete icon and removes the track from local state.
   - **Note**: Removal is UI-only (Spotify's API doesn't support queue removal by index).
 - **Now Playing card**: Prominent row at the top with 100 dp album art and green "NOW PLAYING" label.
-- **Podcast support**: Queue items use `SpotifyPlayableItem` which unifies tracks and episodes. Album art falls back to episode → album → show imagery. Subtitle shows publisher for episodes, artist for tracks.
+- **Podcast + audiobook support**: Queue items use `SpotifyPlayableItem` which unifies tracks, episodes, and chapters. Album art falls back to item → episode/chapter → album/show/audiobook imagery. Subtitle shows publisher/generic podcast text for episodes, author for audiobook chapters, and artist for tracks.
 
 ### 4.4 Component Library
 
@@ -540,14 +541,17 @@ Preferences: `KEY_LOCKED_DEVICE_ID`, `KEY_LOCKED_DEVICE_NAME` in DataStore.
 
 ## 5. API Hacks & Known Limitations
 
-### 5.1 Deprecated Endpoints (403 Workarounds)
+### 5.1 Deprecated / Removed Endpoints (Workarounds + Migrations)
 
-As of November 2024, Spotify deprecated several Browse API endpoints for developer apps:
+Spotify's February 2026 Web API migration removed several endpoints this app previously relied on or had to avoid:
 
 | Deprecated Endpoint | HTTP Response | Our Workaround |
 |---|---|---|
 | `GET /v1/browse/featured-playlists` | 403 Forbidden | `getTopArtists(limit=1, short_term)` → `search(type=playlist, q=<artistName>)` → populates "Suggested For You" |
-| `GET /v1/browse/new-releases` | 403 Forbidden | `getTopArtists(limit=5, short_term)` → `getArtistAlbums()` per artist → populates "New Releases" |
+| `GET /v1/browse/new-releases` | Removed in Feb 2026 | `getTopArtists(limit=5, short_term)` → `getArtistAlbums()` per artist → populates "New Releases" |
+| `GET /v1/artists/{id}/top-tracks` | Removed in Feb 2026 | `search(type=track, q=artist:<name>, limit=10)` → filter to the target artist |
+| `GET /v1/playlists/{id}/tracks` | Removed in Feb 2026 | `GET /v1/playlists/{id}/items` → map `items.item` back into local track rows |
+| `GET /v1/me/tracks/contains` and `PUT/DELETE /v1/me/tracks` | Removed in Feb 2026 | `GET /v1/me/library/contains` and `PUT/DELETE /v1/me/library` with Spotify URIs |
 
 Both workarounds share a single `getTopArtists` call (fetched once as a shared `async` in `loadHomeFeed()`) to minimise API usage.
 

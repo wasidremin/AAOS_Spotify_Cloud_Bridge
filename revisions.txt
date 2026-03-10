@@ -1,4 +1,57 @@
 ═══════════════════════════════════════════════════════════════
+ R5.12  —  2026-03-10
+═══════════════════════════════════════════════════════════════
+ Summary: Fixed Now Playing display broken by Spotify removing support for `chapter` in the player polling endpoint
+
+ Changes:
+   • Removed `chapter` from the `additional_types` query parameter on `GET /v1/me/player` — Spotify's 2026 API now returns 400 "Unknown type 'chapter'" for this value, causing the playback-state poll to fail every ~4 seconds and leaving the Now Playing card blank
+   • Updated `SpotifyApiServiceTest` assertion for `getCurrentPlayback` to verify only `episode` is sent — not `chapter` — matching the corrected default
+   • Expanded the 403 error message in `SpotifyViewModel` to include "stale build calling a removed endpoint" as a fourth diagnostic bullet, replacing the now-inaccurate "scope or dev-mode quota restriction" log tag
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/SpotifyApiService.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/network/SpotifyApiServiceTest.kt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: PASS  (player poll now returns 204 OK; Now Playing card updates correctly)
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.11  —  2026-03-10
+═══════════════════════════════════════════════════════════════
+ Summary: Migrated the app to Spotify's February/March 2026 Web API changes
+
+ Changes:
+   • Replaced the removed playlist-tracks endpoint with `GET /v1/playlists/{id}/items`, updated the playlist item model to read `item` payloads, and added a backward-compatible track mapper so existing track UIs keep working
+   • Added playlist `itemCount` compatibility so library/home/pin subtitles continue to show correct counts whether Spotify returns legacy `tracks.total` or the renamed `items.total`
+   • Replaced removed track-specific library save/check endpoints with the new generic `PUT/DELETE /v1/me/library` and `GET /v1/me/library/contains` URI-based calls
+   • Replaced the removed artist top-tracks endpoint with a search-based fallback (`type=track`, `limit=10`) filtered back to the selected artist for the Artist Detail screen
+   • Updated search defaults to stay within the new February 2026 max/default limits and removed obsolete unused endpoint declarations for browse categories and new releases
+   • Removed podcast publisher-dependent sorting/filtering in Library because Spotify no longer returns `show.publisher` in February 2026 payloads
+   • Updated `SpotifyApiServiceTest` to cover playlist items, current-playback chapter queries, and the new generic library save/remove/contains endpoints
+   • Refreshed README, Architecture, Testing Guide, and SDS documentation to describe the 2026 API migration and the Audiobooks library/detail flows
+
+ Files Modified:
+   • README.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/data/SpotifyLibraryRepository.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/SpotifyApiService.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/model/SpotifyModels.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/HomeScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/LibraryScreen.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/network/SpotifyApiServiceTest.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+
+ Build: PASS
+ Tests: PASS
+ Emulator: PASS  (playlist items load via /items endpoint; legacy /tracks endpoint confirmed 403)
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.10  —  2026-03-10
 ═══════════════════════════════════════════════════════════════
  Summary: QR code overflow fix, improved 403 error messaging, per-track queue
