@@ -1,59 +1,56 @@
-# AAOS Spotify Cloud-Bridge
+# AAOS Cloud-Bridge
 
-An Android Automotive OS (AAOS) media app that provides a fully custom Jetpack Compose UI for Spotify browsing and playback control — without playing any audio locally.
+Cloud-Bridge is an independent, open-source educational template for developers who want to learn how to build Android Automotive OS (AAOS) interfaces on top of the Spotify Web API.
 
-
+> This project is not affiliated with, endorsed by, or sponsored by Spotify. It is a developer template that uses your own Spotify developer app credentials. The repository and GitHub Pages URL keep their historical names for compatibility with the existing redirect URI and hosted onboarding page.
 
 ## The Concept
 
-This app provides a pixel-perfect, CarPlay-inspired music interface for your car's infotainment system. Unlike the native AAOS media templates (which have rigid layouts and UXR scrolling limits), this uses a custom `distractionOptimized` Activity to deliver a premium automotive experience:
+Cloud-Bridge demonstrates a remote-control architecture for AAOS:
 
-1. **Browsing**: A large-tile grid home screen with recently played, top tracks, featured playlists, and new releases — all fetched via the **Spotify Web API**.
-2. **Playback**: When you tap play, a **REST API command** targets Spotify on your phone as the playback device.
-3. **Audio**: Your phone plays the audio → Bluetooth A2DP → car speakers.
+1. **Browsing**: A fully custom Jetpack Compose UI renders playlists, albums, artists, podcasts, audiobooks, and generated mixes using the Spotify Web API.
+2. **Playback control**: When you tap play, the app sends a REST API command targeting Spotify on the phone as the playback device.
+3. **Audio routing**: The phone remains the audio endpoint, so sound still flows phone → Bluetooth A2DP → car speakers.
 
-The app intentionally does not register as an AAOS media source. Native Bluetooth remains the active audio route so phone playback, steering wheel controls, and speaker output stay stable. This "cloud-bridge" pattern bypasses the need for Android Auto or Apple CarPlay while giving you full control over the car's UI.
+The template intentionally does not register as an AAOS media source. Native Bluetooth remains the active audio route so phone playback, steering-wheel controls, and speaker output stay stable. This "cloud-bridge" pattern is useful for developers exploring custom automotive UIs without implementing local audio playback.
 
-## Configuring the Spotify API
+## Bring Your Own Spotify Developer App
 
-Because this app utilizes a "Smart TV" style QR-code login flow to bypass the car's lack of a web browser, your Spotify Developer application must be configured exactly as follows to ensure the OAuth flow works seamlessly.
+Cloud-Bridge is designed around a bring-your-own-key model. To run it, configure your own Spotify Developer application:
 
 1. Go to the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) and create an app.
 2. Note your **Client ID** and **Client Secret**.
-3. **Crucial Step:** In your app's Settings, add the following exact URL to your **Redirect URIs** (the trailing slash is mandatory):
+3. Add this exact redirect URI (including the trailing slash):
    `https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/`
-4. Ensure your app has access to the Web API. The web app companion will automatically request the following required scopes during login: `user-library-read`, `user-library-modify`, `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`, `user-read-recently-played`, `user-top-read`, and `playlist-read-private`.
+4. Ensure the companion flow can request these scopes: `user-library-read`, `user-library-modify`, `user-read-playback-state`, `user-modify-playback-state`, `user-read-currently-playing`, `user-read-recently-played`, `user-top-read`, `playlist-read-private`, and `playlist-read-collaborative`.
 
-## Adding Accounts (The QR "Cloud Relay" Workflow)
+## Account Onboarding (QR Cloud Relay)
 
+To avoid typing OAuth secrets on an in-car display, the template uses a multi-profile QR relay flow backed by Firebase and GitHub Pages:
 
+1. **Initiation:** Tap **Add profile with QR code** in Settings.
+2. **Session generation:** The car generates a one-time 6-character session code and QR code.
+3. **Phone handoff:** The QR code opens the companion web page hosted on GitHub Pages.
+4. **OAuth approval:** The user enters the credentials for their own Spotify developer app, then approves the requested scopes with Spotify.
+5. **Relay transfer:** The companion page writes the resulting `refresh_token`, developer credentials, and profile metadata into a temporary Firebase Realtime Database node for that session.
+6. **Completion:** The car polls the relay, inserts or refreshes the Room `user_profiles` entry, activates it, clears cache/pins for isolation, and deletes the cloud payload.
 
-To solve the problem of authenticating on a car screen without a built-in browser, this app uses a Multi-Profile "Cloud Relay" architecture powered by Firebase and GitHub Pages. 
-
-Here is the exact workflow for adding an account:
-1. **Initiation:** Tap "Add profile with QR code" in the app's Settings. 
-2. **Session Generation:** The car generates a random 6-character session code (e.g., `FPHTZK`) and displays a QR Code.
-3. **Scanning:** The user scans the QR code with their phone, which opens the companion web app hosted on GitHub Pages.
-4. **Authentication:** The user enters their Spotify Developer `Client ID` and `Client Secret` into the secure web page on their phone, which redirects them to Spotify to authorize the app.
-5. **The Relay:** Once authorized, the web app securely drops the resulting `refresh_token`, `client_id`, and the user's profile metadata into a temporary Firebase Realtime Database node linked to the 6-character session code.
-6. **Completion:** The car, which has been polling the Firebase endpoint, detects the payload, downloads the credentials into a local encrypted Room database (`user_profiles`), sets the profile to active, and instantly deletes the payload from the cloud. 
-
-*Note: You can add multiple profiles (e.g., "Primary Profile", "Spouse", "Guest") and seamlessly switch between them in the Settings tab. Doing so swaps the active token and instantly reloads the Home and Library grids with that user's customized data.*
+This is the primary onboarding path. The legacy `SetupActivity` and PowerShell helper still exist for development, CI, and fallback troubleshooting.
 
 ## Quick Start
 
-1. Clone the repo and open in Android Studio.
-2. Set up an AAOS emulator (API 33+ Automotive image).
-3. Create a [Spotify Developer App](https://developer.spotify.com/dashboard) (configured with the Redirect URI mentioned above).
-4. Set up a free Firebase Realtime Database in Test Mode and update `CLOUD_RELAY_BASE_URL` in `RetrofitProvider.kt` with your Firebase URL.
+1. Clone the repo and open it in Android Studio.
+2. Set up an AAOS emulator (API 33+ automotive image).
+3. Create your own [Spotify Developer App](https://developer.spotify.com/dashboard) with the redirect URI above.
+4. If you are forking this template for your own deployment, replace the checked-in Firebase relay URL in `RetrofitProvider.kt` with your own relay backend.
 5. Build and install: `./gradlew assembleDebug && adb install app/build/outputs/apk/debug/app-debug.apk`
-6. Launch "Spotify Cloud-Bridge" from the AAOS app launcher.
-7. You will immediately be presented with the QR Code onboarding screen. Scan it with your phone, enter your API credentials, and log in.
+6. Launch **Cloud-Bridge** from the AAOS app launcher.
+7. Complete QR onboarding from your phone.
 
-*Alternative (Legacy) Login:* For CI or manual terminal setups, you can still inject credentials directly via ADB: 
+*Alternative (legacy) login:* For CI or manual terminal setups, you can still inject credentials directly via ADB:
 `adb shell am start -n com.cloudbridge.spotify/.auth.SetupActivity --es client_id <id> --es refresh_token <token>`
 
-The GitHub Pages companion now requests both `playlist-read-private` and `playlist-read-collaborative`. After deploying updates to [docs/index.html](docs/index.html), use the new **Refresh Permissions** action in Settings to re-consent the active profile in place so the refreshed token includes the new playlist scope without creating a duplicate profile.
+The GitHub Pages companion requests both `playlist-read-private` and `playlist-read-collaborative`. Use **Refresh Permissions** in Settings whenever you add scopes to your developer app so the active profile is updated in place.
 
 ## Architecture
 
@@ -69,6 +66,7 @@ AAOS Launcher → MainActivity (distractionOptimized)
                SpotifyPlaybackController → Spotify Web API
                       ↓
                Phone plays audio → Bluetooth → Car speakers
+```
 
 ## Refactor Review Notes
 
@@ -171,10 +169,11 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 ```bash
 # Unit tests
 ./gradlew test
+```
 
+## Project Structure
 
-##Project Structure
-
+```text
 app/src/main/kotlin/com/cloudbridge/spotify/
 ├── SpotifyCloudBridgeApp.kt          # Application — DI root
 ├── auth/                              # Token management, interceptors, Setup UI
@@ -192,3 +191,4 @@ app/src/main/kotlin/com/cloudbridge/spotify/
 │   ├── screens/                       # Home, Library, NowPlaying, Queue, Settings, etc.
 │   └── components/                    # MiniPlayer, AlbumArtTile, PlayerControls
 └── util/                              # Sealed ApiResult wrappers
+```

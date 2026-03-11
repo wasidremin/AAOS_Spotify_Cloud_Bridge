@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Spotify Cloud Bridge</string>
+    <string name="app_name">Cloud-Bridge</string>
     <string name="setup_activity_title">Cloud Bridge Settings</string>
 
     <!-- Setup Activity -->
-    <string name="setup_title">Spotify Cloud Bridge Setup</string>
-    <string name="setup_instructions">Enter your Spotify API credentials below.\n\nYou need a Client ID from developer.spotify.com and a Refresh Token obtained via the Authorization Code flow.</string>
+    <string name="setup_title">Cloud-Bridge Setup</string>
+    <string name="setup_instructions">Enter the credentials for your Spotify developer app below.\n\nCloud-Bridge is an independent educational template for AAOS developers using the Spotify Web API. Bring your own Client ID and Refresh Token.</string>
     <string name="hint_client_id">Spotify Client ID</string>
     <string name="hint_refresh_token">Spotify Refresh Token</string>
     <string name="btn_save">Save Credentials</string>
@@ -15,7 +15,7 @@
     <string name="toast_error_empty">Please fill in both fields</string>
 
     <!-- Media Service -->
-    <string name="browse_root_title">Spotify Cloud Bridge</string>
+    <string name="browse_root_title">Cloud-Bridge</string>
     <string name="browse_playlists_title">My Playlists</string>
 
     <!-- Errors -->

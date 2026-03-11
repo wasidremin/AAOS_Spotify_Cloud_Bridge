@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Cloud Bridge Setup</title>
+    <title>Cloud-Bridge Setup</title>
     <style>
         body { background-color: #121212; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
         .container { background-color: #181818; padding: 40px; border-radius: 16px; width: 100%; max-width: 450px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
@@ -30,22 +30,22 @@
 <body>
 
 <div class="container" id="form-ui">
-    <h2 id="form-title">Connect to Cloud Bridge</h2>
-    <p id="form-copy">Link your Spotify account to your car's media system.</p>
+    <h2 id="form-title">Connect to Cloud-Bridge</h2>
+    <p id="form-copy">Link your own Spotify developer app to Cloud-Bridge. This page supports an independent educational AAOS template and is not affiliated with Spotify.</p>
 
     <div class="instructions" id="instructions-box">
-        <p class="title" id="instructions-title">How to get your credentials:</p>
+        <p class="title" id="instructions-title">Bring your own Spotify developer app:</p>
         <ol id="instructions-list">
             <li>Go to the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify Developer Dashboard</a> and log in.</li>
             <li>Click <strong>Create App</strong> (or open an existing one).</li>
             <li>In the app Settings, ensure your <strong>Redirect URI</strong> is set exactly to:<br><code>https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/</code></li>
-            <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> below.</li>
+            <li>Copy your <strong>Client ID</strong> and <strong>Client Secret</strong> below. The historical GitHub Pages URL stays the same for redirect compatibility.</li>
         </ol>
     </div>
 
     <input type="text" id="clientId" placeholder="Spotify Client ID" required autocomplete="off">
     <input type="password" id="clientSecret" placeholder="Spotify Client Secret" required autocomplete="off">
-    <button id="connect-button" onclick="startAuth()">Connect Spotify</button>
+    <button id="connect-button" onclick="startAuth()">Continue with Spotify</button>
 </div>
 
 <div class="container hidden" id="loading-ui">
@@ -56,7 +56,7 @@
 
 <div class="container hidden" id="success-ui">
     <h2>Success!</h2>
-    <p id="success-copy">Your profile has been sent to the car. You can now close this window and look at your car's screen.</p>
+    <p id="success-copy">Your profile has been sent to the car. You can now close this window and continue in Cloud-Bridge on the car screen.</p>
 </div>
 
 <script>

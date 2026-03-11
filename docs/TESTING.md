@@ -1,4 +1,6 @@
-# Testing Guide — AAOS Spotify Cloud-Bridge v2.0
+# Testing Guide — Cloud-Bridge v2.8.0
+
+This guide validates the current Cloud-Bridge developer template implementation: QR onboarding, multi-profile support, custom AAOS UI, and Spotify Web API remote-control behavior.
 
 ## 1. Unit Tests
 

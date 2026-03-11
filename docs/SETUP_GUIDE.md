@@ -1,4 +1,6 @@
-# Setup Guide — AAOS Spotify Cloud-Bridge v2.0
+# Setup Guide — Cloud-Bridge v2.8.0
+
+Cloud-Bridge is an independent educational AAOS template for developers using the Spotify Web API. It is not affiliated with Spotify; you are expected to bring your own Spotify developer app credentials.
 
 ## Prerequisites
 
@@ -41,7 +43,7 @@ git commit -m "<summary>"
 git push origin main
 ```
 
-## 2. Create a Spotify Developer App
+## 2. Create Your Own Spotify Developer App
 
 1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
 2. Click **Create App**
@@ -53,8 +55,7 @@ git push origin main
 
 ## 3. Obtain a Refresh Token
 
-Since this is a single-user app and AAOS doesn't have a browser for OAuth,
-you'll obtain a refresh token once on your computer and enter it into the app.
+QR onboarding is the primary path for the current template, but the local helper below is still useful for development, CI, and fallback troubleshooting.
 
 If you're already upgrading from an older single-profile install, the app now migrates any previously saved DataStore credentials into the new profile database automatically on first launch so they are not lost.
 
@@ -74,7 +75,7 @@ What it does:
 - opens Spotify authorization in your browser
 - captures the callback locally on `127.0.0.1:8888`
 - exchanges the code for fresh tokens
-- updates [app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt](../app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt) with the new client ID, client secret, and refresh token
+- updates the hardcoded fallback constants in [app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt](../app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt) for local development convenience
 - writes a backup `TokenManager.kt.bak` next to the source file
 
 ### Option B — Using the Spotify OAuth Tool
@@ -91,11 +92,12 @@ user-read-currently-playing
 user-read-recently-played
 user-top-read
 playlist-read-private
+playlist-read-collaborative
 ```
 
-> **Important**: v2.0 requires `user-library-modify` (heart/unheart tracks),
-> `user-read-recently-played`, `user-top-read`, and `playlist-read-private`
-> in addition to the v1.0 scopes.
+> **Important**: Current builds require `user-library-modify`,
+> `user-read-recently-played`, `user-top-read`, `playlist-read-private`, and
+> `playlist-read-collaborative` for the full feature set.
 
 ### Option C — Using curl (manual PKCE flow)
 
@@ -202,7 +204,7 @@ The app runs as a standalone Compose Activity — no MediaBrowser integration.
 adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 ```
 
-Or find **Spotify Cloud-Bridge** in the AAOS launcher/app list.
+Or find **Cloud-Bridge** in the AAOS launcher/app list.
 
 > The Activity has `distractionOptimized` metadata, which allows it to remain
 > visible while driving (bypassing AAOS UXR scrolling restrictions).
@@ -246,7 +248,7 @@ reaches the car via Bluetooth A2DP.
 |---------|----------|
 | App crashes on launch | Check logcat for `MainActivity` / `SpotifyViewModel` tags |
 | Home screen is empty | Verify scopes include `user-read-recently-played`, `user-top-read`, `playlist-read-private` |
-| "No device found" | Ensure Spotify is open on your phone and phone is on same network |
+| "No device found" | Ensure Spotify is open on your phone and logged into the same account/profile that Cloud-Bridge is controlling |
 | Tracks don't play | Check logcat for `SpotifyPlaybackController` / `DeviceManager` tags |
 | Heart button 403s | Token lacks `user-library-modify` scope — re-authorize with updated scopes |
 | 401 errors looping | Refresh token may be revoked — generate a new one |

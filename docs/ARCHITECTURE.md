@@ -1,6 +1,6 @@
-# Architecture — AAOS Spotify Cloud-Bridge
+# Architecture — Cloud-Bridge
 
-> **Version 2.0** — Custom Jetpack Compose UI replacing native AAOS media templates.
+> **Version 2.8.0** — Independent educational AAOS template built on the Spotify Web API.
 
 ## 1. High-Level Overview
 
@@ -43,6 +43,8 @@ The app **never plays audio locally**. All playback commands are relayed to the
 Spotify Web API, which controls playback on the user's phone. The phone's audio
 output reaches the car speakers over Bluetooth A2DP.
 
+Cloud-Bridge is intentionally framed as a developer template and learning project, not an official or consumer Spotify client.
+
 The app also deliberately avoids registering as a `MediaLibraryService`. On AAOS,
 doing so can steal physical audio routing from the native Bluetooth source,
 muting the phone path that this project depends on.
@@ -56,6 +58,7 @@ muting the phone path that this project depends on.
 | Read-only queues | SwipeToDismissBox for queue management |
 | No now-playing customization | Blurred background, hero art, fat slider |
 | Bluetooth route can be hijacked by app-owned media sessions | Keep phone as native Bluetooth source |
+| OAuth is awkward on an in-car display | Use QR onboarding with a phone-hosted companion flow |
 
 Home podcast freshness is derived by fetching a small slice of each saved show's latest episodes and comparing them to the first episode with resume history. The UI only badges shows when the app can confidently infer that newer episodes exist above the listener's most recently played episode.
 
@@ -95,7 +98,7 @@ com.cloudbridge.spotify
 │   ├── SpotifyViewModel.kt             # UI state, navigation, and orchestration only
 │   │                                  # delegates paging and mix generation to data/domain layers
 │   ├── theme/
-│   │   ├── Color.kt                    # Spotify brand palette
+│   │   ├── Color.kt                    # Green-accent dark palette
 │   │   ├── Type.kt                     # Automotive-optimized typography
 │   │   └── Theme.kt                    # Material3 dark color scheme
 │   ├── screens/
@@ -247,7 +250,8 @@ right-side dark/system area is expected platform behavior.
 └──────────────┘
 ```
 
-- **No OAuth flow** — user obtains a refresh token externally (see SETUP_GUIDE)
+- **Primary onboarding flow** — QR companion page handles OAuth in the phone browser and relays credentials to the car
+- **Legacy fallback** — local helper script / SetupActivity can still seed development credentials directly (see SETUP_GUIDE)
 - **Active profile ID** stored in DataStore preferences
 - **Per-profile Spotify credentials** stored in Room `user_profiles`
 - **OkHttp Authenticator** transparently refreshes on 401
@@ -339,17 +343,14 @@ playlist-read-private
 playlist-read-collaborative
 user-modify-playback-state
 user-library-read
-user-library-modify          ← NEW in v2.0 (heart/save button)
+user-library-modify
 user-read-playback-state
 user-read-currently-playing
-user-read-email
 user-read-recently-played
-user-read-private
 user-top-read
 ```
 
-> **Note**: `user-library-modify` was added in v2.0 for the save/unsave track
-> feature. Existing refresh tokens will need to be re-authorized with this scope.
+> These are the scopes currently requested by the GitHub Pages companion flow in [docs/index.html](index.html).
 
 ## 9. Future Enhancements
 
@@ -358,6 +359,6 @@ user-top-read
 - [x] Shuffle/repeat toggle
 - [x] Heart/save track button
 - [x] Search support (Spotify Search API)
+- [x] Multiple account support
 - [ ] Drag-to-reorder queue
-- [ ] Multiple account support
 - [ ] WebSocket / SSE for real-time playback updates

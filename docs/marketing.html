@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Spotify Cloud-Bridge — Premium Spotify for Your Car</title>
-    <meta name="description" content="A custom Android Automotive OS app that brings a premium Spotify experience to your car's infotainment display. Browse, play, and control — all from the dashboard.">
+    <title>Cloud-Bridge — Open-Source AAOS Template for the Spotify Web API</title>
+    <meta name="description" content="An open-source educational Android Automotive OS template that demonstrates how to build a custom in-car interface on top of the Spotify Web API using your own developer app credentials.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -601,14 +601,14 @@
     <div class="hero-content">
         <div class="hero-badge">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.5 16c-.83 0-1.5-.67-1.5-1.5S5.67 13 6.5 13s1.5.67 1.5 1.5S7.33 16 6.5 16zm11 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM5 11l1.5-4.5h11L19 11H5z"/></svg>
-            Android Automotive OS
+            Educational Template
         </div>
         <h1>
-            Premium Spotify<br>
-            <span class="gradient-text">for Your Car</span>
+            Open-Source AAOS<br>
+            <span class="gradient-text">Template for Spotify Web API</span>
         </h1>
         <p>
-            A custom-built automotive media app that brings the full Spotify experience to your car's infotainment display — without needing Android Auto or Apple CarPlay.
+            Cloud-Bridge is an independent developer template that shows how to build a custom AAOS browsing and playback-control experience on top of the Spotify Web API while keeping audio playback on the phone.
         </p>
         <div class="hero-cta">
             <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank">
@@ -616,7 +616,7 @@
                 View on GitHub
             </a>
             <a href="#features" class="btn btn-secondary">
-                Explore Features
+                Explore the Template
             </a>
         </div>
     </div>
@@ -625,7 +625,7 @@
 <!-- ─── Hero Screenshot ────────────────────────────────────────── -->
 <div class="showcase">
     <div class="showcase-frame">
-        <img src="images/marketing_home.png" alt="Spotify Cloud-Bridge Home Screen on an automotive display">
+        <img src="images/marketing_home.png" alt="Cloud-Bridge home screen on an automotive display">
     </div>
 </div>
 
@@ -685,20 +685,20 @@
     <div class="section-inner">
         <div class="section-header">
             <p class="section-label">Features</p>
-            <h2 class="section-title">Everything You Need, <br>Designed for Driving</h2>
-            <p class="section-subtitle">Built specifically for automotive displays — large touch targets, glanceable layouts, and zero distraction overhead.</p>
+            <h2 class="section-title">Reference Features for <br>AAOS Developers</h2>
+            <p class="section-subtitle">A set of practical implementation examples: custom browsing UI, remote playback control, QR onboarding, and resilient automotive-friendly layouts.</p>
         </div>
 
         <div class="features-grid">
             <div class="feature-card">
                 <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">🏠</div>
                 <h3>Smart Home Screen</h3>
-                <p>A personalized dashboard with Jump Back In, Your Podcasts, Custom Mixes, Pinned Favorites, Suggested For You, and New Releases — all reorderable from Settings.</p>
+                <p>A reference home dashboard implementation with Jump Back In, podcasts, generated mixes, pinned favorites, and reorderable sections.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🎵</div>
                 <h3>Custom Mixes</h3>
-                <p>Daily Drive blends your podcasts with liked songs. Decade mixes (80s, 90s, 2000s, 2010s) are built from your saved tracks and Spotify recommendations — with 2×2 album art grids.</p>
+                <p>Example domain logic for generated queues: Daily Drive, decade mixes, and hybrid recommendation flows built from library data plus Spotify recommendations.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon" style="background: rgba(225, 29, 72, 0.12); color: var(--accent-pink);">🎙️</div>
@@ -728,12 +728,12 @@
             <div class="feature-card">
                 <div class="feature-icon" style="background: rgba(225, 29, 72, 0.12); color: var(--accent-pink);">📱</div>
                 <h3>QR Code Onboarding</h3>
-                <p>Add Spotify profiles without typing in the car. Scan a QR code, authenticate on your phone, and credentials are securely relayed via Firebase to the car in seconds.</p>
+                <p>A Smart-TV-style pairing flow: scan a QR code, complete OAuth on a phone, and relay credentials back to the car through Firebase.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon" style="background: rgba(147, 51, 234, 0.12); color: var(--accent-purple);">👥</div>
                 <h3>Multi-Profile Support</h3>
-                <p>Family car? No problem. Add multiple Spotify accounts and switch between them from Settings. Each profile switch clears the library cache for clean isolation.</p>
+                <p>Demonstrates Room-backed profile storage, active-profile switching, and cache isolation for multiple developer-linked accounts.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon" style="background: rgba(8, 145, 178, 0.12); color: var(--accent-cyan);">🧹</div>
@@ -760,7 +760,7 @@
         <div class="section-header">
             <p class="section-label">Screenshots</p>
             <h2 class="section-title">See It in Action</h2>
-            <p class="section-subtitle">Running on an Android Automotive OS emulator with an ultra-wide automotive display.</p>
+            <p class="section-subtitle">Reference screens captured from the template running on an Android Automotive OS emulator.</p>
         </div>
 
         <div class="gallery-grid">
@@ -876,8 +876,8 @@
 
 <!-- ─── CTA ────────────────────────────────────────────────────── -->
 <section class="cta-section">
-    <h2 class="section-title">Ready to Upgrade Your Drive?</h2>
-    <p>Open source and built for automotive enthusiasts.</p>
+    <h2 class="section-title">Ready to Explore the Template?</h2>
+    <p>Open source, educational, and designed for AAOS developers using their own Spotify developer apps.</p>
     <div class="hero-cta">
         <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -889,7 +889,7 @@
 <!-- ─── Footer ─────────────────────────────────────────────────── -->
 <footer>
     <p>
-        Spotify Cloud-Bridge &mdash; Built with Kotlin, Jetpack Compose & the Spotify Web API<br>
+        Cloud-Bridge &mdash; Independent educational AAOS template built with Kotlin, Jetpack Compose, and the Spotify Web API<br>
         <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge">github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge</a>
     </p>
 </footer>

@@ -1,7 +1,7 @@
-# Software Design Specification — Spotify Cloud Bridge (AAOS)
+# Software Design Specification — Cloud-Bridge (AAOS)
 
-> **Version**: 1.4  
-> **Date**: 2026-03-01  
+> **Version**: 2.8.0  
+> **Date**: 2026-03-11  
 > **Author**: Senior Android Architect  
 > **Platform**: Android Automotive OS (AAOS) API 30+ / targetSdk 35  
 > **Language**: Kotlin 2.0
@@ -17,17 +17,19 @@
 5. [API Hacks & Known Limitations](#5-api-hacks--known-limitations)
 6. [Testing Strategy](#6-testing-strategy)
 7. [File & Directory Structure](#7-file--directory-structure)
-8. [Extended Features (v1.3)](#8-extended-features-v13)
+8. [Extended Features](#8-extended-features-v13)
 
 ---
 
 ## 1. Introduction & Architecture
 
-### 1.1 What is Cloud Bridge?
+### 1.1 What is Cloud-Bridge?
 
-The **Spotify Cloud Bridge** is a fully custom Android Automotive OS application that provides a Spotify listening experience _without_ bundling the Spotify Android SDK or using the native `MediaBrowserService` template system.
+**Cloud-Bridge** is an independent, open-source educational Android Automotive OS template that demonstrates how to build a Spotify Web API-powered in-car interface _without_ bundling the Spotify Android SDK or using the native `MediaBrowserService` template system.
 
 Instead of playing audio locally, the app operates as a **remote control**: it sends REST commands to the Spotify Web API, which in turn routes playback to the user's phone (connected via Bluetooth or Wi-Fi to the car's audio system). The car's head unit acts purely as a display and input surface — a "bridge to the cloud."
+
+This project is not an official Spotify client and should be understood as a bring-your-own-key developer template.
 
 ### 1.2 Why Cloud Bridge?
 
@@ -36,7 +38,7 @@ Instead of playing audio locally, the app operates as a **remote control**: it s
 | AAOS MediaBrowserService templates are visually rigid and offer limited UX | Custom Jetpack Compose UI with full creative control |
 | Spotify's Android SDK requires audio focus negotiation on the car | No local audio — playback happens on the phone |
 | Car OEMs restrict sideloaded apps with UXR (User Experience Restrictions) | `distractionOptimized` manifest flag bypasses UXR |
-| Token management is complex for in-car apps without a browser | Manual refresh-token entry + automatic background refresh |
+| Token management is complex for in-car apps without a browser | QR companion onboarding + automatic background refresh |
 
 ### 1.3 Architecture Overview
 
@@ -362,7 +364,7 @@ When the optional **Clean Swapper** mode is enabled, the app prefers URI-list pl
 
 The UI follows a **CarPlay-inspired** dark aesthetic specifically designed for automotive displays:
 
-- **Dark-mode only**: Reduces glare during nighttime driving; aligns with Spotify's brand palette.
+- **Dark-mode only**: Reduces glare during nighttime driving; uses a green-accent dark palette tuned for the template UI.
 - **Large touch targets**: Minimum 56 dp, primary controls 72–96 dp — essential for accurate tapping on large automotive touchscreens.
 - **4-column grid**: Optimised for landscape ~17" head-unit displays at 1920×1080 or 2560×1440.
 - **Album-art-forward**: Every navigable item is represented by a large square tile with cover art, gradient overlay, and white text.
@@ -742,11 +744,7 @@ AAOS_Spotify_Cloud_Bridge/
 
 ---
 
-_End of Software Design Specification_
-
----
-
-## 8. Extended Features (v1.3)
+## 8. Extended Features
 
 ### 8.1 MediaSession — Steering Wheel Button Integration
 

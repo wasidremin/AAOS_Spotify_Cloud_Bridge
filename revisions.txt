@@ -1,4 +1,31 @@
 ═══════════════════════════════════════════════════════════════
+ R5.13  —  2026-03-11
+═══════════════════════════════════════════════════════════════
+ Summary: Reframed the project as Cloud-Bridge, an educational AAOS template, and updated user-facing/docs branding for compliance
+
+ Changes:
+   • Renamed the user-facing app label from "Spotify Cloud Bridge" to `Cloud-Bridge` in Android string resources and setup copy so the launcher/on-device UI no longer leads with the Spotify trademark
+   • Reworked README, Setup Guide, Architecture docs, SDS, companion web page, and marketing page to frame the project as an independent open-source educational template for developers using their own Spotify developer app credentials
+   • Performed a doc/code alignment pass to remove outdated claims (for example, "no OAuth flow", missing `playlist-read-collaborative`, outdated v2.0 headings, and unimplemented multi-profile notes)
+   • Kept `versionCode = 15` in `app/build.gradle.kts` so the next release/AAB remains up-revved from the prior tester artifact
+
+ Files Modified:
+   • README.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/build.gradle.kts
+   • app/src/main/res/values/strings.xml
+   • docs/ARCHITECTURE.md
+   • docs/SETUP_GUIDE.md
+   • docs/TESTING.md
+   • docs/index.html
+   • docs/marketing.html
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.12  —  2026-03-10
 ═══════════════════════════════════════════════════════════════
  Summary: Fixed Now Playing display broken by Spotify removing support for `chapter` in the player polling endpoint
