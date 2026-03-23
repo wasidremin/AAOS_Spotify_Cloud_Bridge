@@ -1,4 +1,23 @@
 ═══════════════════════════════════════════════════════════════
+ R5.18  —  2026-03-23
+═══════════════════════════════════════════════════════════════
+ Summary: Release build v2.8.1 — bumped version metadata and generated the next signed AAB
+
+ Changes:
+   • Bumped `versionCode` to 16 and `versionName` to `2.8.1` so the new release artifact is uniquely installable
+   • Generated the signed release bundle for the current Cloud-Bridge snapshot
+   • Kept the previous Now Playing and long-podcast sync hardening work intact from R5.17
+
+ Files Modified:
+   • app/build.gradle.kts
+   • revisions.txt
+
+ Build: PASS
+ Tests: SKIPPED
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.17  —  2026-03-23
 ═══════════════════════════════════════════════════════════════
  Summary: Reworked Now Playing transport layout and hardened long-podcast metadata sync / Queue polling
