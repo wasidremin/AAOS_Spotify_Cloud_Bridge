@@ -254,6 +254,14 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 2. **Expected**: If 429 occurs, app waits and retries automatically
 3. **Expected**: Check logcat for `RateLimitRetryInterceptor` messages
 
+#### TC-12B: AVRCP Bluetooth Kickstart Recovery
+1. Start playback from the phone so the app memorizes an active device ID.
+2. Lock the phone and wait for the OS to deep-sleep Spotify.
+3. Trigger **Play**, **Resume**, **Next**, or another wrapped transport action from the car UI.
+4. **Expected**: The first cloud command may fail, then the app logs that the device is likely asleep.
+5. **Expected**: The app dispatches an AVRCP media-play event, waits briefly, refreshes discovery, and retries the playback command once.
+6. **Expected**: The playback action succeeds when the phone wakes and reconnects.
+
 #### TC-18: Navigation & MiniPlayer UI Fixes
 1. Start on any screen (Home, Library, Search, etc.)
 2. Tap the same NavigationRail tab multiple times

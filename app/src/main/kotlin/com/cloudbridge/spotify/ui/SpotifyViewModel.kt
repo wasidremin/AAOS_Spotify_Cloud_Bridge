@@ -1,6 +1,8 @@
 package com.cloudbridge.spotify.ui
 
+import android.media.AudioManager
 import android.util.Log
+import android.view.KeyEvent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -163,6 +165,7 @@ class SpotifyViewModel(
         private const val PODCAST_METADATA_POLL_MS = 2000L
         private const val PODCAST_NULL_TOLERANCE_MS = 20_000L
         private const val PODCAST_RETRY_DELAY_MS = 750L
+        private const val BLUETOOTH_KICKSTART_DELAY_MS = 2000L
         private const val SAVED_STATUS_REFRESH_MS = 15_000L
         private const val MAX_QUEUE_BATCH = 100
         private val PINNABLE_TYPES = setOf("playlist", "album", "show")
@@ -1322,10 +1325,12 @@ class SpotifyViewModel(
         viewModelScope.launch {
             val resolvedUri = resolveTrackUriForPlayback(trackUri)
             val preserveContext = resolvedUri == trackUri && !contextUri.isNullOrBlank()
-            val success = if (preserveContext) {
-                playbackController.play(trackUri = trackUri, contextUri = contextUri)
-            } else {
-                playbackController.play(trackUri = resolvedUri)
+            val success = attemptPlaybackCommandWithWakeup {
+                if (preserveContext) {
+                    playbackController.play(trackUri = trackUri, contextUri = contextUri)
+                } else {
+                    playbackController.play(trackUri = resolvedUri)
+                }
             }
             _deviceNotFoundError.value = !success // Show error if false, clear if true
             delay(500)
@@ -1336,10 +1341,12 @@ class SpotifyViewModel(
     fun playContext(contextUri: String) {
         openNowPlaying()
         viewModelScope.launch {
-            val success = if (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri)) {
-                playResolvedTrackList(_detailTracks.value)
-            } else {
-                playbackController.play(trackUri = null, contextUri = contextUri)
+            val success = attemptPlaybackCommandWithWakeup {
+                if (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri)) {
+                    playResolvedTrackList(_detailTracks.value)
+                } else {
+                    playbackController.play(trackUri = null, contextUri = contextUri)
+                }
             }
             _deviceNotFoundError.value = !success
             delay(500)
@@ -1370,7 +1377,9 @@ class SpotifyViewModel(
                 }
 
                 val playbackUris = resolveUrisForPlayback(generatedUris)
-                val success = playbackUris.isNotEmpty() && playbackController.play(uris = playbackUris)
+                val success = playbackUris.isNotEmpty() && attemptPlaybackCommandWithWakeup {
+                    playbackController.play(uris = playbackUris)
+                }
 
                 _deviceNotFoundError.value = !success
                 if (success) {
@@ -1424,10 +1433,12 @@ class SpotifyViewModel(
         val isCurrentlyPlaying = current?.isPlaying == true
         _playbackState.update { it?.copy(isPlaying = !isCurrentlyPlaying) } // Instant UI update
         viewModelScope.launch {
-            val success = if (isCurrentlyPlaying) {
-                playbackController.pause()
-            } else {
-                playbackController.forceResume()
+            val success = attemptPlaybackCommandWithWakeup {
+                if (isCurrentlyPlaying) {
+                    playbackController.pause()
+                } else {
+                    playbackController.forceResume()
+                }
             }
             _deviceNotFoundError.value = !success
             delay(500)
@@ -1438,7 +1449,9 @@ class SpotifyViewModel(
     fun resumePlayback() {
         openNowPlaying()
         viewModelScope.launch {
-            val success = playbackController.forceResume()
+            val success = attemptPlaybackCommandWithWakeup {
+                playbackController.forceResume()
+            }
             _deviceNotFoundError.value = !success
             delay(500)
             syncPlaybackState()
@@ -1447,7 +1460,10 @@ class SpotifyViewModel(
 
     fun skipNext() {
         viewModelScope.launch {
-            playbackController.next()
+            val success = attemptPlaybackCommandWithWakeup {
+                playbackController.next()
+            }
+            _deviceNotFoundError.value = !success
             delay(500)
             syncPlaybackState()
         }
@@ -1455,10 +1471,40 @@ class SpotifyViewModel(
 
     fun skipPrevious() {
         viewModelScope.launch {
-            playbackController.previous()
+            val success = attemptPlaybackCommandWithWakeup {
+                playbackController.previous()
+            }
+            _deviceNotFoundError.value = !success
             delay(500)
             syncPlaybackState()
         }
+    }
+
+    private fun kickstartBluetoothMedia() {
+        try {
+            val audioManager = context.applicationContext.getSystemService(android.content.Context.AUDIO_SERVICE) as? AudioManager
+            if (audioManager == null) {
+                Log.w(TAG, "Bluetooth kickstart skipped: AudioManager unavailable")
+                return
+            }
+
+            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
+            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
+            Log.i(TAG, "Dispatched AVRCP Bluetooth kickstart")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to dispatch AVRCP Bluetooth kickstart: ${e.message}", e)
+        }
+    }
+
+    private suspend fun attemptPlaybackCommandWithWakeup(command: suspend () -> Boolean): Boolean {
+        val firstAttempt = command()
+        if (firstAttempt) return true
+
+        Log.w(TAG, "Playback command failed; device is likely asleep. Attempting AVRCP Bluetooth kickstart.")
+        kickstartBluetoothMedia()
+        delay(BLUETOOTH_KICKSTART_DELAY_MS)
+        deviceManager.refreshDeviceId()
+        return command()
     }
 
     fun skipBack15Seconds() {
@@ -1736,6 +1782,13 @@ class SpotifyViewModel(
             if (playback != null) {
                 _isOffline.value = false
                 _deviceNotFoundError.value = false // Auto-clear error when device is detected
+                val playbackDevice = playback.device
+                if (playbackDevice?.isActive == true && !playbackDevice.id.isNullOrBlank()) {
+                    deviceManager.registerActiveDevice(
+                        id = playbackDevice.id!!,
+                        name = playbackDevice.name ?: "Active device"
+                    )
+                }
                 _playbackState.value = playback
                 lastSuccessfulPlaybackSyncAtMs = System.currentTimeMillis()
                 val currentItemUri = playback.item?.uri
@@ -2113,7 +2166,9 @@ class SpotifyViewModel(
 
         openNowPlaying()
         viewModelScope.launch(Dispatchers.IO) {
-            val success = playResolvedTrackList(tracks)
+            val success = attemptPlaybackCommandWithWakeup {
+                playResolvedTrackList(tracks)
+            }
             _deviceNotFoundError.value = !success
             if (success) {
                 delay(500)

@@ -152,6 +152,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Metadata sync now tracks offline conditions (`UnknownHostException`, `SocketTimeoutException`) and exposes `isOffline` in `SpotifyViewModel`.
 - Spotify 429 penalties now trigger a global lockout persisted in `TokenManager`, surfaced through a top warning banner, and enforced by the API auth/interceptor stack so the app stops issuing outbound Spotify API requests until the lockout expires.
 - `TokenManager` now resolves auth from the active Room-backed profile before interceptors and token refresh paths read credentials.
+- Playback metadata now passively memorizes the last active Spotify device ID, and failed transport commands can dispatch an AVRCP Bluetooth media-play kickstart through Android `AudioManager` before retrying discovery once.
 - The app displays an in-app top red banner: **"Offline Mode - Reconnecting..."** when connectivity drops.
 - The app also surfaces Spotify auth/scope failures (HTTP 401/403) with a top banner and direct **Open** action into Setup.
 

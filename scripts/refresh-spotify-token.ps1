@@ -29,7 +29,7 @@ function Get-ConfigValue {
     return ($child.InnerText | Out-String).Trim()
 }
 
-function Ensure-NotPlaceholder {
+function Test-NotPlaceholder {
     param(
         [Parameter(Mandatory)] [string]$Value,
         [Parameter(Mandatory)] [string]$Label
@@ -59,7 +59,7 @@ function New-QueryString {
     }) -join '&')
 }
 
-function Escape-KotlinString {
+function ConvertTo-KotlinEscapedString {
     param([Parameter(Mandatory)] [string]$Value)
 
     return $Value.Replace('\', '\\').Replace('"', '\"')
@@ -83,21 +83,21 @@ function Update-TokenManagerFile {
     $updated = [regex]::Replace(
         $updated,
         'private const val HARDCODED_CLIENT_ID = ".*?"',
-        ('private const val HARDCODED_CLIENT_ID = "{0}"' -f (Escape-KotlinString $ClientId)),
+        ('private const val HARDCODED_CLIENT_ID = "{0}"' -f (ConvertTo-KotlinEscapedString $ClientId)),
         [System.Text.RegularExpressions.RegexOptions]::Singleline
     )
 
     $updated = [regex]::Replace(
         $updated,
         'private const val HARDCODED_CLIENT_SECRET = ".*?"',
-        ('private const val HARDCODED_CLIENT_SECRET = "{0}"' -f (Escape-KotlinString $ClientSecret)),
+        ('private const val HARDCODED_CLIENT_SECRET = "{0}"' -f (ConvertTo-KotlinEscapedString $ClientSecret)),
         [System.Text.RegularExpressions.RegexOptions]::Singleline
     )
 
     $updated = [regex]::Replace(
         $updated,
         'private const val HARDCODED_REFRESH_TOKEN = ".*?"',
-        ('private const val HARDCODED_REFRESH_TOKEN = "{0}"' -f (Escape-KotlinString $RefreshToken)),
+        ('private const val HARDCODED_REFRESH_TOKEN = "{0}"' -f (ConvertTo-KotlinEscapedString $RefreshToken)),
         [System.Text.RegularExpressions.RegexOptions]::Singleline
     )
 
@@ -126,8 +126,8 @@ $redirectUriRaw = Get-ConfigValue -Node $configRoot -Name 'RedirectUri'
 $scopesRaw = Get-ConfigValue -Node $configRoot -Name 'Scopes'
 $tokenManagerRelative = Get-ConfigValue -Node $configRoot -Name 'TokenManagerPath'
 
-Ensure-NotPlaceholder -Value $clientId -Label 'Client ID'
-Ensure-NotPlaceholder -Value $clientSecret -Label 'Client Secret'
+Test-NotPlaceholder -Value $clientId -Label 'Client ID'
+Test-NotPlaceholder -Value $clientSecret -Label 'Client Secret'
 
 $redirectUri = [uri]$redirectUriRaw
 if (-not ($redirectUri.Host -in @('127.0.0.1', 'localhost'))) {

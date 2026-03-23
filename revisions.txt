@@ -1,4 +1,31 @@
 ═══════════════════════════════════════════════════════════════
+ R5.14  —  2026-03-22
+═══════════════════════════════════════════════════════════════
+ Summary: Added AVRCP Bluetooth kickstart recovery and passive device memorization for sleeping phones
+
+ Changes:
+   • Added `DeviceManager.registerActiveDevice()` so the ViewModel can cache a known active playback device ID/name without waiting for a fresh `/me/player/devices` discovery cycle
+   • Updated `SpotifyViewModel.syncPlaybackState()` to memorize active devices from playback metadata and added an AVRCP Bluetooth media-play kickstart using Android `AudioManager` when playback commands fail and the phone likely put Spotify to sleep
+   • Wrapped `playTrack`, `playContext`, `playCustomMix`, `togglePlayPause`, `resumePlayback`, `skipNext`, `skipPrevious`, and `playArtistTopTracks` in a retry helper that wakes Bluetooth media, waits 2 seconds, refreshes discovery, and retries once
+   • Cleared the current diagnostics list by moving marketing-page inline styles into CSS classes, adding `rel="noopener noreferrer"` to external links, and renaming two PowerShell helper functions to approved verbs
+
+ Files Modified:
+   • README.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/DeviceManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • docs/marketing.html
+   • revisions.txt
+   • scripts/refresh-spotify-token.ps1
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.13  —  2026-03-11
 ═══════════════════════════════════════════════════════════════
  Summary: Reframed the project as Cloud-Bridge, an educational AAOS template, and updated user-facing/docs branding for compliance

@@ -191,6 +191,8 @@ Network exceptions (`UnknownHostException`, `SocketTimeoutException`) toggle
 HTTP 401/403 errors from content endpoints set `requiresReauth`, which shows a
 user-facing banner with a direct link to Setup.
 
+**Passive device registration + AVRCP wakeup**: When playback metadata reports an active device, `SpotifyViewModel` now forwards that device ID/name to `DeviceManager.registerActiveDevice()` so the last confirmed phone target stays cached. If a playback command still fails, the ViewModel dispatches a native `KEYCODE_MEDIA_PLAY` down/up pair via Android `AudioManager`, waits 2 seconds, refreshes device discovery, and retries the command once.
+
 **Global rate-limit lockout policy**: Long-running Spotify 429 penalties are persisted in `TokenManager` as an absolute lockout-until timestamp. `AuthInterceptor` consults that shared state before every API request and throws a typed lockout exception while the penalty is active, which prevents every screen and background loop from blindly re-hitting Spotify during the cooldown window.
 
 **Multi-profile policy (Phase 1)**: DataStore now stores only the active profile pointer plus app preferences. Spotify credentials live in Room `user_profiles`, and `TokenManager` resolves client ID, refresh token, access token, and expiry from the currently active profile for interceptors, authenticators, and Settings.

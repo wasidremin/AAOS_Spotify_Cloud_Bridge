@@ -130,6 +130,14 @@ class DeviceManager(private val api: SpotifyApiService) {
 
     fun getCachedDeviceId(): String? = cachedDeviceId
 
+    /**
+     * Passively remembers a known active playback device observed elsewhere.
+     */
+    fun registerActiveDevice(id: String, name: String) {
+        if (id.isBlank()) return
+        cacheDevice(id, name.ifBlank { "Active device" })
+    }
+
     private fun cacheDevice(id: String, name: String) {
         mutex.tryLock() // Best-effort lock for setting cache
         try {

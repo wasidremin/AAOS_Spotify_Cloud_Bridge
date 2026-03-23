@@ -315,6 +315,17 @@ flowchart TD
     style K fill:#E57373,color:#000
 ```
 
+### 3.2A AVRCP Bluetooth Kickstart Fallback
+
+Some phone vendors aggressively deep-sleep Spotify when the handset is locked. In that state, the Spotify Web API can temporarily lose visibility into the phone's Connect device and playback commands fail even though the phone is still paired to the car over Bluetooth.
+
+Cloud-Bridge now adds a two-stage recovery path:
+
+1. **Passive device memorization**: `syncPlaybackState()` inspects `GET /v1/me/player` and, when Spotify reports an active device with a non-null ID, forwards it to `DeviceManager.registerActiveDevice()` so the last known phone target remains cached.
+2. **Native Bluetooth wake-up**: if a wrapped playback command returns `false`, the ViewModel dispatches `KEYCODE_MEDIA_PLAY` (`ACTION_DOWN` + `ACTION_UP`) through Android `AudioManager`, waits 2 seconds, refreshes device discovery, and retries the command once.
+
+This leverages the existing AVRCP link between the AAOS head unit and the phone to simulate a steering-wheel play press and wake the sleeping media stack locally before retrying the cloud call.
+
 ### 3.3 Metadata Polling Loop
 
 The `SpotifyViewModel` runs a **3-second polling loop** that calls `GET /v1/me/player` to sync the car's Now Playing UI with the phone's actual playback state:

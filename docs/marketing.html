@@ -50,8 +50,8 @@
             right: 0;
             z-index: 100;
             background: rgba(18, 18, 18, 0.85);
-            backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(20px);
             border-bottom: 1px solid rgba(255, 255, 255, 0.06);
             transition: background 0.3s;
         }
@@ -373,6 +373,31 @@
             margin-bottom: 20px;
         }
 
+        .feature-icon-green {
+            background: rgba(29, 185, 84, 0.12);
+            color: var(--spotify-green);
+        }
+
+        .feature-icon-blue {
+            background: rgba(37, 99, 235, 0.12);
+            color: var(--accent-blue);
+        }
+
+        .feature-icon-pink {
+            background: rgba(225, 29, 72, 0.12);
+            color: var(--accent-pink);
+        }
+
+        .feature-icon-purple {
+            background: rgba(147, 51, 234, 0.12);
+            color: var(--accent-purple);
+        }
+
+        .feature-icon-cyan {
+            background: rgba(8, 145, 178, 0.12);
+            color: var(--accent-cyan);
+        }
+
         .feature-card h3 {
             font-size: 20px;
             font-weight: 700;
@@ -591,7 +616,7 @@
             <li><a href="#screenshots">Screenshots</a></li>
             <li><a href="#how-it-works">How It Works</a></li>
             <li><a href="#tech-stack">Tech Stack</a></li>
-            <li><a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" target="_blank">GitHub</a></li>
+            <li><a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" target="_blank" rel="noopener noreferrer">GitHub</a></li>
         </ul>
     </div>
 </nav>
@@ -611,7 +636,7 @@
             Cloud-Bridge is an independent developer template that shows how to build a custom AAOS browsing and playback-control experience on top of the Spotify Web API while keeping audio playback on the phone.
         </p>
         <div class="hero-cta">
-            <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank">
+            <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
                 View on GitHub
             </a>
@@ -691,62 +716,62 @@
 
         <div class="features-grid">
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">🏠</div>
+                <div class="feature-icon feature-icon-green">🏠</div>
                 <h3>Smart Home Screen</h3>
                 <p>A reference home dashboard implementation with Jump Back In, podcasts, generated mixes, pinned favorites, and reorderable sections.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🎵</div>
+                <div class="feature-icon feature-icon-blue">🎵</div>
                 <h3>Custom Mixes</h3>
                 <p>Example domain logic for generated queues: Daily Drive, decade mixes, and hybrid recommendation flows built from library data plus Spotify recommendations.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(225, 29, 72, 0.12); color: var(--accent-pink);">🎙️</div>
+                <div class="feature-icon feature-icon-pink">🎙️</div>
                 <h3>Podcast Intelligence</h3>
                 <p>New episode badges on your saved shows. Set any show as your Daily Drive news source. Full episode listing with one-tap playback and progress tracking.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(147, 51, 234, 0.12); color: var(--accent-purple);">🔍</div>
+                <div class="feature-icon feature-icon-purple">🔍</div>
                 <h3>Automotive Search</h3>
                 <p>Full-text search across tracks, albums, and playlists with a 4-column results grid. Debounced input and large keyboard-friendly text fields built for driving.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(8, 145, 178, 0.12); color: var(--accent-cyan);">📚</div>
+                <div class="feature-icon feature-icon-cyan">📚</div>
                 <h3>Full Library Access</h3>
                 <p>Browse playlists, albums, artists, and podcasts with sortable lists, filterable views, and seamless grid/list toggle. Liked Songs always at the top.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">📌</div>
+                <div class="feature-icon feature-icon-green">📌</div>
                 <h3>Pin Favorites</h3>
                 <p>Long-press any playlist, album, or podcast to pin it to your home screen for instant one-tap access. Rearrange and manage pins from a dedicated screen.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🎶</div>
+                <div class="feature-icon feature-icon-blue">🎶</div>
                 <h3>Now Playing Experience</h3>
                 <p>Full-screen Now Playing with blurred album art background, progress slider, playback controls, shuffle/repeat, heart/unsave, and Start Radio — all updating in real time.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(225, 29, 72, 0.12); color: var(--accent-pink);">📱</div>
+                <div class="feature-icon feature-icon-pink">📱</div>
                 <h3>QR Code Onboarding</h3>
                 <p>A Smart-TV-style pairing flow: scan a QR code, complete OAuth on a phone, and relay credentials back to the car through Firebase.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(147, 51, 234, 0.12); color: var(--accent-purple);">👥</div>
+                <div class="feature-icon feature-icon-purple">👥</div>
                 <h3>Multi-Profile Support</h3>
                 <p>Demonstrates Room-backed profile storage, active-profile switching, and cache isolation for multiple developer-linked accounts.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(8, 145, 178, 0.12); color: var(--accent-cyan);">🧹</div>
+                <div class="feature-icon feature-icon-cyan">🧹</div>
                 <h3>Clean Swapper</h3>
                 <p>Toggle a family-friendly mode that automatically replaces explicit tracks with clean versions when Spotify has a matching alternative. Persists across sessions.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(29, 185, 84, 0.12); color: var(--spotify-green);">🎛️</div>
+                <div class="feature-icon feature-icon-green">🎛️</div>
                 <h3>Queue Management</h3>
                 <p>View and manage your up-next queue with swipe-to-dismiss. Shows tracks, podcast episodes, and audiobook chapters with real-time progress on the current item.</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon" style="background: rgba(37, 99, 235, 0.12); color: var(--accent-blue);">🛡️</div>
+                <div class="feature-icon feature-icon-blue">🛡️</div>
                 <h3>Resilient by Design</h3>
                 <p>Automatic token refresh, offline detection, global rate-limit lockout, and graceful degradation. Built to survive spotty cell coverage on long drives.</p>
             </div>
@@ -879,7 +904,7 @@
     <h2 class="section-title">Ready to Explore the Template?</h2>
     <p>Open source, educational, and designed for AAOS developers using their own Spotify developer apps.</p>
     <div class="hero-cta">
-        <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank">
+        <a href="https://github.com/WasiDremin/AAOS_Spotify_Cloud_Bridge" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
             View on GitHub
         </a>
