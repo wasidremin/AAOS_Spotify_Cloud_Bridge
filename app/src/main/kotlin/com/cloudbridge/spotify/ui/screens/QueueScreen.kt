@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -60,11 +61,13 @@ fun QueueScreen(
     viewModel: SpotifyViewModel,
     contentPadding: PaddingValues = PaddingValues(0.dp)
 ) {
+    val upNext by viewModel.upNext.collectAsState()
     val queue by viewModel.queue.collectAsState()
     val playback by viewModel.playbackState.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val layoutDirection = LocalLayoutDirection.current
     var isGridView by remember { mutableStateOf(false) }
+    val hasItems = upNext.isNotEmpty() || queue.isNotEmpty()
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -100,17 +103,7 @@ fun QueueScreen(
             )
         }
 
-        // Up Next label
-        if (queue.isNotEmpty()) {
-            Text(
-                text = "Up Next",
-                style = MaterialTheme.typography.titleSmall,
-                color = SpotifyLightGray,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-        }
-
-        if (queue.isEmpty()) {
+        if (!hasItems) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -137,27 +130,34 @@ fun QueueScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    itemsIndexed(
-                        items = queue,
-                        key = { index, item -> "grid-queue-${item.id}-$index" }
-                    ) { _, item ->
-                        AlbumArtTile(
-                            imageUrl = item.images?.firstOrNull()?.url
-                                ?: item.album?.images?.firstOrNull()?.url
-                                ?: item.show?.images?.firstOrNull()?.url
-                                ?: item.audiobook?.images?.firstOrNull()?.url,
-                            title = item.name,
-                            subtitle = if (item.type == "episode") {
-                                item.show?.publisher ?: "Podcast"
-                            } else if (item.type == "chapter") {
-                                item.audiobook?.authors?.joinToString(", ") { it.name }
-                                    ?: item.audiobook?.publisher
-                                    ?: "Audiobook"
-                            } else {
-                                item.artists?.joinToString(", ") { it.name } ?: ""
-                            },
-                            onClick = { viewModel.playTrack(item.uri) }
-                        )
+                    if (upNext.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            QueueSectionHeader(
+                                title = "Up Next",
+                                subtitle = "Next items from the active playlist, album, or podcast"
+                            )
+                        }
+                        itemsIndexed(
+                            items = upNext,
+                            key = { index, item -> "grid-up-next-${item.id}-$index" }
+                        ) { _, item ->
+                            QueueGridTile(item = item, onClick = { viewModel.playTrack(item.uri) })
+                        }
+                    }
+
+                    if (queue.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            QueueSectionHeader(
+                                title = if (upNext.isNotEmpty()) "Spotify Queue" else "Queue",
+                                subtitle = if (upNext.isNotEmpty()) "Explicitly queued items and Spotify fallbacks" else null
+                            )
+                        }
+                        itemsIndexed(
+                            items = queue,
+                            key = { index, item -> "grid-queue-${item.id}-$index" }
+                        ) { _, item ->
+                            QueueGridTile(item = item, onClick = { viewModel.playTrack(item.uri) })
+                        }
                     }
                 }
             } else {
@@ -165,58 +165,128 @@ fun QueueScreen(
                     contentPadding = contentPaddings,
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    itemsIndexed(
-                        items = queue,
-                        key = { index, item -> "list-queue-${item.id}-$index" }
-                    ) { index, item ->
-                        val dismissState = rememberSwipeToDismissBoxState(
-                            positionalThreshold = { totalDistance -> totalDistance * 0.5f },
-                            confirmValueChange = { value ->
-                                if (value != SwipeToDismissBoxValue.Settled) {
-                                    viewModel.removeFromQueue(index)
-                                    true
-                                } else false
-                            }
-                        )
+                    if (upNext.isNotEmpty()) {
+                        item {
+                            QueueSectionHeader(
+                                title = "Up Next",
+                                subtitle = "Next items from the active playlist, album, or podcast"
+                            )
+                        }
+                        itemsIndexed(
+                            items = upNext,
+                            key = { index, item -> "list-up-next-${item.id}-$index" }
+                        ) { _, item ->
+                            QueueTrackRow(
+                                item = item,
+                                isCurrentlyPlaying = false,
+                                onClick = { viewModel.playTrack(item.uri) }
+                            )
+                        }
+                    }
 
-                        SwipeToDismissBox(
-                            state = dismissState,
-                            backgroundContent = {
-                                val color by animateColorAsState(
-                                    when (dismissState.targetValue) {
-                                        SwipeToDismissBoxValue.Settled -> SpotifyCardSurface
-                                        else -> ErrorRed.copy(alpha = 0.3f)
-                                    },
-                                    label = "dismiss_bg"
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(color)
-                                        .padding(horizontal = 24.dp),
-                                    contentAlignment = Alignment.CenterEnd
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Delete,
-                                        contentDescription = "Remove",
-                                        tint = ErrorRed,
-                                        modifier = Modifier.size(24.dp)
+                    if (queue.isNotEmpty()) {
+                        item {
+                            QueueSectionHeader(
+                                title = if (upNext.isNotEmpty()) "Spotify Queue" else "Queue",
+                                subtitle = if (upNext.isNotEmpty()) "Explicitly queued items and Spotify fallbacks" else null
+                            )
+                        }
+                        itemsIndexed(
+                            items = queue,
+                            key = { index, item -> "list-queue-${item.id}-$index" }
+                        ) { index, item ->
+                            val dismissState = rememberSwipeToDismissBoxState(
+                                positionalThreshold = { totalDistance -> totalDistance * 0.5f },
+                                confirmValueChange = { value ->
+                                    if (value != SwipeToDismissBoxValue.Settled) {
+                                        viewModel.removeFromQueue(index)
+                                        true
+                                    } else false
+                                }
+                            )
+
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                backgroundContent = {
+                                    val color by animateColorAsState(
+                                        when (dismissState.targetValue) {
+                                            SwipeToDismissBoxValue.Settled -> SpotifyCardSurface
+                                            else -> ErrorRed.copy(alpha = 0.3f)
+                                        },
+                                        label = "dismiss_bg"
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(color)
+                                            .padding(horizontal = 24.dp),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Delete,
+                                            contentDescription = "Remove",
+                                            tint = ErrorRed,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                },
+                                content = {
+                                    QueueTrackRow(
+                                        item = item,
+                                        isCurrentlyPlaying = false,
+                                        onClick = { viewModel.playTrack(item.uri) }
                                     )
                                 }
-                            },
-                            content = {
-                                QueueTrackRow(
-                                    item = item,
-                                    isCurrentlyPlaying = false,
-                                    onClick = { viewModel.playTrack(item.uri) }
-                                )
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun QueueSectionHeader(title: String, subtitle: String? = null) {
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleSmall,
+            color = SpotifyLightGray
+        )
+        if (!subtitle.isNullOrBlank()) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = SpotifyMediumGray
+            )
+        }
+    }
+}
+
+@Composable
+private fun QueueGridTile(
+    item: SpotifyPlayableItem,
+    onClick: () -> Unit
+) {
+    AlbumArtTile(
+        imageUrl = item.images?.firstOrNull()?.url
+            ?: item.album?.images?.firstOrNull()?.url
+            ?: item.show?.images?.firstOrNull()?.url
+            ?: item.audiobook?.images?.firstOrNull()?.url,
+        title = item.name,
+        subtitle = if (item.type == "episode") {
+            item.show?.publisher ?: "Podcast"
+        } else if (item.type == "chapter") {
+            item.audiobook?.authors?.joinToString(", ") { it.name }
+                ?: item.audiobook?.publisher
+                ?: "Audiobook"
+        } else {
+            item.artists?.joinToString(", ") { it.name } ?: ""
+        },
+        onClick = onClick
+    )
 }
 
 @Composable

@@ -98,6 +98,17 @@ fun PlaylistDetailScreen(
                     Text("Start Radio", style = MaterialTheme.typography.titleSmall)
                 }
 
+                if (screen.id != "liked-songs") {
+                    OutlinedButton(
+                        onClick = { viewModel.playEnhancedPlaylist(screen.id) },
+                        enabled = tracks.isNotEmpty(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = SpotifyGreen),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Text("Enhance", style = MaterialTheme.typography.titleSmall)
+                    }
+                }
+
                 Button(
                     onClick = {
                         if (canPlayAll) {

@@ -138,6 +138,13 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 4. Tap "Play All" button
 5. **Expected**: First track starts playing
 
+#### TC-04G: Playlist Enhance Playback
+1. Navigate to **Library → Playlists** and open any playlist with at least 10 playable songs
+2. Tap **Enhance**
+3. **Expected**: Playback starts on the phone
+4. Open **Queue**
+5. **Expected**: The **Up Next** section alternates roughly five playlist tracks followed by two Spotify recommendations
+
 #### TC-04E: Playlist Track Queue Button
 1. Navigate to **Library → Playlists** and open any playlist
 2. Tap the visible queue icon on an individual track row
@@ -179,6 +186,8 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 2. **Expected**: Now Playing screen slides up with blurred background
 3. **Expected**: Hero album art, track title, artist name visible
 4. **Expected**: Seek slider shows current position
+5. **Expected**: Bottom time labels show elapsed time on the left and remaining time on the right (not total duration)
+6. **Expected**: Smaller metadata text remains readable against bright album art because the subtitle and collection labels render on darker contrast chips
 5. Tap the collapse chevron
 6. **Expected**: Now Playing slides down, MiniPlayer returns
 
@@ -201,10 +210,11 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 #### TC-08: Queue Management
 1. Navigate to Queue screen
 2. **Expected**: Currently playing track highlighted in green
-3. **Expected**: "Up Next" section shows upcoming tracks
-4. Swipe a queued track to the left
-5. **Expected**: Track removed from queue (SwipeToDismiss animation)
-6. **Expected**: Requires a deliberate long horizontal drag (~50% width); diagonal scroll gestures do not dismiss
+3. **Expected**: When the playback source is known, **Up Next** shows context-aware upcoming tracks separately from **Spotify Queue**
+4. **Expected**: Podcast playback prefers the next most recent unplayed episode before falling back to Spotify queue suggestions
+5. Swipe a queued track to the left in the **Spotify Queue** section
+6. **Expected**: Track removed from the local queue display (SwipeToDismiss animation)
+7. **Expected**: Requires a deliberate long horizontal drag (~50% width); diagonal scroll gestures do not dismiss
 
 #### TC-13: Library Tab Persistence
 1. Navigate to Library and select **Podcasts** (or any non-default tab)

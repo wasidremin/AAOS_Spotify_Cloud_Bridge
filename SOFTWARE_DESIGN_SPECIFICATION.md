@@ -484,8 +484,9 @@ Provides device management and account options:
 
 Scrollable track list with:
 - Back arrow + context name header
-- "Play All" button (green, 24 dp rounded)
+- "Play All" button (green, 24 dp rounded), "Start Radio", and playlist-only "Enhance" action that interleaves every five playlist tracks with two Spotify recommendations
 - Track rows: number, 64 dp album art, title, artist, duration
+- Track rows expose a one-tap queue button plus long-press queueing for safer in-car use
 - Currently playing track highlighted in `SpotifyGreen` (#1DB954)
 
 #### Now Playing Screen (Overlay)
@@ -495,7 +496,9 @@ Overlay that slides up via `AnimatedVisibility(slideInVertically)`. **Only cover
 Split-screen `Row` layout:
 - **Left column** (weight 1f): Collapse chevron, track title, artist, full `PlayerControls` (progress slider, shuffle/prev/play/next/repeat, radio/heart).
 - **Right column** (weight 1f): Crisp album art at 1:1 aspect ratio with 16 dp rounded corners.
-- **Background**: Blurred album art (25 dp blur) + 60% black scrim.
+- **Background**: Blurred album art (25 dp blur) + adaptive dark scrim that becomes heavier in night mode.
+- **Contrast treatment**: Subtitle + album/show labels sit on semi-opaque dark chips so smaller metadata remains readable against bright artwork.
+- **Time labels**: `PlayerControls` now render elapsed time on the left and remaining time on the right.
 
 #### Queue Screen
 
@@ -506,6 +509,8 @@ Displays the upcoming playback queue with a grid/list toggle:
   - Swiping reveals a red delete icon and removes the track from local state.
   - **Note**: Removal is UI-only (Spotify's API doesn't support queue removal by index).
 - **Now Playing card**: Prominent row at the top with 100 dp album art and green "NOW PLAYING" label.
+- **Up Next vs Queue split**: The ViewModel derives a separate **Up Next** section from the active playback context (playlist/album ordering or next unplayed podcast episodes) and leaves explicit/manual Spotify queue items in a dedicated **Spotify Queue** section.
+- **Podcast fallback**: If the active podcast has no more unplayed newer-to-older episodes after the current episode, the **Up Next** section falls back to Spotify's queue suggestions.
 - **Podcast + audiobook support**: Queue items use `SpotifyPlayableItem` which unifies tracks, episodes, and chapters. Album art falls back to item → episode/chapter → album/show/audiobook imagery. Subtitle shows publisher/generic podcast text for episodes, author for audiobook chapters, and artist for tracks.
 
 ### 4.4 Component Library

@@ -28,7 +28,7 @@ import kotlinx.coroutines.isActive
  * 1. **Progress slider** — thumb + active track in white, inactive in gray.
  *    Supports drag-seeking: while the user drags, `isSeeking` is `true`
  *    and the local `seekPosition` drives the slider instead of [progressMs].
- * 2. **Time labels** — elapsed (left) and total duration (right).
+ * 2. **Time labels** — elapsed (left) and remaining (right).
  * 3. **Primary control row** — Shuffle · Previous · Play/Pause · Next · Repeat.
  *    Touch targets are 48–72 dp to meet AAOS accessibility guidelines.
  * 4. **Secondary row** — Radio (seed recommendations) and Heart (save/unsave).
@@ -270,12 +270,12 @@ fun PlayerControls(
         ) {
             Text(
                 text = formatTime(displayProgress.toLong()),
-                style = MaterialTheme.typography.bodySmall,
+                style = MaterialTheme.typography.bodyMedium,
                 color = SpotifyLightGray
             )
             Text(
-                text = formatTime(durationMs),
-                style = MaterialTheme.typography.bodySmall,
+                text = "-${formatTime((durationMs - displayProgress.toLong()).coerceAtLeast(0L))}",
+                style = MaterialTheme.typography.bodyMedium,
                 color = SpotifyLightGray
             )
         }

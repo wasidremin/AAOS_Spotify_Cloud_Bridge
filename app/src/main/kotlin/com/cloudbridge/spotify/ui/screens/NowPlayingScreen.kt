@@ -92,7 +92,7 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = if (isSystemNightMode) 0.72f else 0.48f))
+                .background(Color.Black.copy(alpha = if (isSystemNightMode) 0.82f else 0.60f))
         )
 
         // Layer 3: Split-screen content
@@ -140,10 +140,11 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                 // Artist / Publisher (Clickable)
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.headlineLarge.copy(fontSize = 28.sp),
-                    color = SpotifyLightGray,
+                    style = MaterialTheme.typography.headlineLarge.copy(fontSize = 32.sp, lineHeight = 38.sp),
+                    color = SpotifyWhite.copy(alpha = 0.94f),
                     maxLines = 1,
                     modifier = Modifier
+                        .background(Color.Black.copy(alpha = 0.28f), RoundedCornerShape(12.dp))
                         .clip(RoundedCornerShape(8.dp))
                         .clickable(enabled = track != null && !isChapter) {
                             if (isEpisode) {
@@ -158,7 +159,7 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                                 }
                             }
                         }
-                        .padding(vertical = 8.dp) // Invisible padding expands touch target
+                        .padding(horizontal = 12.dp, vertical = 10.dp) // Invisible padding expands touch target
                         .basicMarquee()
                 )
 
@@ -166,10 +167,11 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                 if (!collectionName.isNullOrBlank()) {
                     Text(
                         text = collectionName,
-                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 20.sp),
-                        color = SpotifyMediumGray,
+                        style = MaterialTheme.typography.titleLarge.copy(fontSize = 24.sp, lineHeight = 30.sp),
+                        color = SpotifyLightGray,
                         maxLines = 1,
                         modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
                             .clip(RoundedCornerShape(8.dp))
                             .clickable(enabled = track != null && !isChapter) {
                                 if (isEpisode) {
@@ -186,7 +188,7 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                                     }
                                 }
                             }
-                            .padding(vertical = 8.dp) // Invisible padding expands touch target
+                            .padding(horizontal = 12.dp, vertical = 10.dp) // Invisible padding expands touch target
                             .basicMarquee()
                     )
                 }
@@ -225,7 +227,7 @@ fun NowPlayingScreen(viewModel: SpotifyViewModel) {
                 ) {
                     Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null, modifier = Modifier.size(36.dp), tint = SpotifyGreen)
                     Spacer(Modifier.width(16.dp))
-                    Text("Up Next", style = MaterialTheme.typography.headlineMedium)
+                    Text("Queue & Up Next", style = MaterialTheme.typography.headlineMedium)
                 }
             }
 

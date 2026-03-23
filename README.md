@@ -101,9 +101,9 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 | **Search** | Dedicated automotive search tab with large text field, 4-column results grid, and long-press actions for queueing albums/playlists/tracks or pinning results |
 | **Library** | Playlists / Albums / Artists / Podcasts tabs with local sort + filter controls, plus tab state preserved across back navigation |
 | **Add Profile** | Smart-TV-style QR onboarding screen with a 6-character session code, QR code, and cloud-relay completion polling |
-| **Now Playing** | Blurred background, hero album art, larger explicit badge, live liked-song heart sync, ±15 second skip for spoken-word playback, Start Radio, and chapter-safe audiobook metadata |
-| **Queue** | Swipe-to-dismiss queue management with higher drag threshold; supports tracks, podcast episodes, and audiobook chapters, plus long-press queueing from Search, Library, playlists, albums, and podcast episodes |
-| **Playlist Detail** | Track list with larger tap targets, explicit badges, now-playing speaker indicator, and quick Start Radio actions |
+| **Now Playing** | Blurred background, higher-contrast metadata chips, hero album art, larger explicit badge, live liked-song heart sync, elapsed + remaining time labels, ±15 second skip for spoken-word playback, Start Radio, and chapter-safe audiobook metadata |
+| **Queue** | Separate Up Next and Spotify Queue sections with higher drag-threshold swipe dismissal for queued items; supports tracks, podcast episodes, and audiobook chapters, plus long-press queueing from Search, Library, playlists, albums, and podcast episodes |
+| **Playlist Detail** | Track list with larger tap targets, explicit badges, now-playing speaker indicator, one-tap queueing, Start Radio, and an Enhance action that interleaves playlist tracks with recommendations in a 5:2 pattern |
 
 ## Automotive Layout Notes
 
@@ -125,6 +125,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Library Playlists, Albums, Podcasts, and Audiobooks can each switch between large-tile grids and roomy list rows without losing context actions.
 - Playlists now use Spotify's February 2026 `GET /v1/playlists/{id}/items` response shape, so playlist counts and detail rows stay compatible with the renamed `items` payload.
 - Playlists and albums still expose **Add to queue** from long-press menus, and playlist track rows now also show a visible one-tap queue button for safer in-car discovery.
+- Playlist detail now also exposes **Enhance**, which builds a recommendation-assisted sequence by interleaving every five playlist tracks with two Spotify recommendations before playback starts.
 - Library always refreshes playlists/albums/podcasts/audiobooks from Spotify when opened, while still seeding from cache first so newly added media appears without requiring an app reinstall.
 - Library Playlists always shows an official "Liked Songs" tile first, backed by `GET /v1/me/tracks`.
 - Playlist sync is now hardened against malformed Spotify playlist payloads by allowing nullable playlist IDs/names/URIs in the network model and rejecting bad records before they hit the cache.
@@ -144,6 +145,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Upgrades from the older single-profile build migrate any legacy DataStore credentials into the new Room-backed profile store on startup so saved keys are preserved.
 - Search uses a 750ms debounce and `imePadding()` so the on-screen keyboard does not obscure results.
 - Playlist/Artist detail rows show a speaker icon for the active track (not color-only), improving glanceability.
+- Queue now splits derived **Up Next** items from the raw Spotify queue, so podcasts can surface the next most recent unplayed episodes before falling back to Spotify-provided queue suggestions.
 - MiniPlayer width is responsive (`fillMaxWidth(0.55f)` with `widthIn(max = 600.dp)`) for split-screen resilience and increased to 112dp height with 88dp album art and 52dp play/pause icon for better automotive visibility.
 - Podcast episodes and audiobook chapters in Queue, Now Playing, and MiniPlayer use `SpotifyPlayableItem` with artwork fallback chain (item images → album/show/audiobook) and type-aware subtitle text, and Library now includes a dedicated Audiobooks tab plus chapter-detail screen.
 

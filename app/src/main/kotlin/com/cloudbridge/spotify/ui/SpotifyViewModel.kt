@@ -168,6 +168,9 @@ class SpotifyViewModel(
         private const val BLUETOOTH_KICKSTART_DELAY_MS = 2000L
         private const val SAVED_STATUS_REFRESH_MS = 15_000L
         private const val MAX_QUEUE_BATCH = 100
+        private const val MAX_UP_NEXT_ITEMS = 20
+        private const val ENHANCED_PLAYLIST_GROUP_SIZE = 5
+        private const val ENHANCED_PLAYLIST_RECOMMENDATIONS_PER_GROUP = 2
         private val PINNABLE_TYPES = setOf("playlist", "album", "show")
         const val CUSTOM_MIX_DAILY_DRIVE = "daily_drive"
         private const val CUSTOM_MIX_80S = "mix_80s"
@@ -313,8 +316,13 @@ class SpotifyViewModel(
 
     // ── Queue ────────────────────────────────────────────────────────
 
+    private val _upNext = MutableStateFlow<List<SpotifyPlayableItem>>(emptyList())
+    val upNext: StateFlow<List<SpotifyPlayableItem>> = _upNext
+
     private val _queue = MutableStateFlow<List<SpotifyPlayableItem>>(emptyList())
     val queue: StateFlow<List<SpotifyPlayableItem>> = _queue
+
+    private var lastPlaybackContextTracks: List<SpotifyTrack> = emptyList()
 
     // ── Artists ──────────────────────────────────────────────────────
 
@@ -1305,8 +1313,15 @@ class SpotifyViewModel(
     private suspend fun syncQueueState(currentPlaybackUri: String? = _playbackState.value?.item?.uri) {
         try {
             val response = api.getQueue()
-            val currentUri = currentPlaybackUri ?: response.currentlyPlaying?.uri
-            _queue.value = normalizeQueue(response.queue, currentUri)
+            val currentItem = _playbackState.value?.item ?: response.currentlyPlaying
+            val currentUri = currentPlaybackUri ?: currentItem?.uri ?: response.currentlyPlaying?.uri
+            val normalizedQueue = normalizeQueue(response.queue, currentUri)
+            val derivedUpNext = currentItem?.let { deriveUpNextItems(it, normalizedQueue) }.orEmpty()
+
+            _upNext.value = derivedUpNext
+            _queue.value = normalizedQueue.filterNot { queuedItem ->
+                derivedUpNext.any { upNextItem -> upNextItem.uri == queuedItem.uri }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load queue: ${e.message}")
         }
@@ -1317,6 +1332,98 @@ class SpotifyViewModel(
         if (currentUri.isNullOrBlank()) return queueItems
         return if (queueItems.firstOrNull()?.uri == currentUri) queueItems.drop(1) else queueItems
     }
+
+    private suspend fun deriveUpNextItems(
+        currentItem: SpotifyPlayableItem,
+        queueItems: List<SpotifyPlayableItem>
+    ): List<SpotifyPlayableItem> {
+        if (currentItem.type == "episode") {
+            val upcomingEpisodes = derivePodcastUpNext(currentItem)
+            return if (upcomingEpisodes.isNotEmpty()) {
+                upcomingEpisodes
+            } else {
+                queueItems.take(MAX_UP_NEXT_ITEMS)
+            }
+        }
+
+        return deriveRememberedContextUpNext(currentItem).take(MAX_UP_NEXT_ITEMS)
+    }
+
+    private suspend fun derivePodcastUpNext(currentItem: SpotifyPlayableItem): List<SpotifyPlayableItem> {
+        val showId = currentItem.show?.id ?: return emptyList()
+        val episodes = when {
+            (_currentScreen.value as? Screen.PodcastDetail)?.id == showId && _detailEpisodes.value.isNotEmpty() -> _detailEpisodes.value
+            else -> libraryRepository.getShowEpisodes(showId = showId, maxEpisodes = MAX_UP_NEXT_ITEMS + 5)
+        }
+        if (episodes.isEmpty()) return emptyList()
+
+        val currentIndex = episodes.indexOfFirst { it.id == currentItem.id }
+        val candidates = when {
+            currentIndex >= 0 -> episodes.drop(currentIndex + 1)
+            else -> episodes
+        }
+
+        return candidates
+            .filterNot(::isEpisodeFullyPlayed)
+            .map { episode -> episode.toPlayableItem(currentItem.show) }
+            .take(MAX_UP_NEXT_ITEMS)
+    }
+
+    private fun deriveRememberedContextUpNext(currentItem: SpotifyPlayableItem): List<SpotifyPlayableItem> {
+        if (lastPlaybackContextTracks.isEmpty()) return emptyList()
+
+        val currentIndex = lastPlaybackContextTracks.indexOfFirst { track ->
+            track.uri == currentItem.uri || (!track.id.isNullOrBlank() && track.id == currentItem.id)
+        }
+        if (currentIndex < 0) return emptyList()
+
+        return lastPlaybackContextTracks
+            .drop(currentIndex + 1)
+            .map { track -> track.toPlayableItem() }
+            .take(MAX_UP_NEXT_ITEMS)
+    }
+
+    private fun isEpisodeFullyPlayed(episode: SpotifyEpisode): Boolean =
+        episode.resumePoint?.fullyPlayed == true
+
+    private fun rememberPlaybackContext(contextUri: String?, tracks: List<SpotifyTrack>) {
+        lastPlaybackContextTracks = tracks.distinctBy { it.uri }.take(MAX_QUEUE_BATCH)
+    }
+
+    private fun clearRememberedPlaybackContext() {
+        lastPlaybackContextTracks = emptyList()
+    }
+
+    private fun tracksForContext(contextUri: String?): List<SpotifyTrack> = when {
+        contextUri.isNullOrBlank() -> emptyList()
+        contextUri == "spotify:user:me:collection" -> _detailTracks.value
+        else -> when (val screen = _currentScreen.value) {
+            is Screen.PlaylistDetail -> if (screen.uri == contextUri) _detailTracks.value else emptyList()
+            is Screen.AlbumDetail -> if (screen.uri == contextUri) _detailTracks.value else emptyList()
+            else -> emptyList()
+        }
+    }
+
+    private fun SpotifyTrack.toPlayableItem(): SpotifyPlayableItem = SpotifyPlayableItem(
+        id = id,
+        name = name,
+        uri = uri,
+        type = "track",
+        durationMs = durationMs,
+        explicit = explicit,
+        artists = artists,
+        album = album
+    )
+
+    private fun SpotifyEpisode.toPlayableItem(show: SpotifyShow?): SpotifyPlayableItem = SpotifyPlayableItem(
+        id = id,
+        name = name,
+        uri = uri,
+        type = "episode",
+        durationMs = durationMs,
+        show = show,
+        images = images
+    )
 
     // ── Playback Controls ────────────────────────────────────────────
 
@@ -1332,6 +1439,11 @@ class SpotifyViewModel(
                     playbackController.play(trackUri = resolvedUri)
                 }
             }
+            if (success && preserveContext) {
+                rememberPlaybackContext(contextUri, tracksForContext(contextUri))
+            } else if (success) {
+                clearRememberedPlaybackContext()
+            }
             _deviceNotFoundError.value = !success // Show error if false, clear if true
             delay(500)
             syncPlaybackState()
@@ -1341,16 +1453,43 @@ class SpotifyViewModel(
     fun playContext(contextUri: String) {
         openNowPlaying()
         viewModelScope.launch {
+            val contextTracks = tracksForContext(contextUri)
             val success = attemptPlaybackCommandWithWakeup {
                 if (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri)) {
-                    playResolvedTrackList(_detailTracks.value)
+                    playResolvedTrackList(_detailTracks.value, rememberedContextUri = contextUri)
                 } else {
                     playbackController.play(trackUri = null, contextUri = contextUri)
                 }
             }
+            if (success) {
+                rememberPlaybackContext(contextUri, contextTracks)
+            }
             _deviceNotFoundError.value = !success
             delay(500)
             syncPlaybackState()
+        }
+    }
+
+    fun playEnhancedPlaylist(playlistId: String) {
+        openNowPlaying()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val playlistTracks = fetchPlaylistTracks(playlistId)
+                val enhancedTracks = buildEnhancedPlaylistSequence(playlistTracks)
+                val success = playResolvedTrackList(
+                    tracks = enhancedTracks,
+                    rememberedContextUri = "enhanced:playlist:$playlistId"
+                )
+                _deviceNotFoundError.value = !success
+                if (success) {
+                    delay(500)
+                    syncPlaybackState()
+                    syncQueueState()
+                }
+            } catch (e: Exception) {
+                handleApiFailure(e)
+                Log.e(TAG, "Failed to enhance playlist $playlistId: ${e.message}", e)
+            }
         }
     }
 
@@ -1383,6 +1522,7 @@ class SpotifyViewModel(
 
                 _deviceNotFoundError.value = !success
                 if (success) {
+                    clearRememberedPlaybackContext()
                     _isOffline.value = false
                     openNowPlaying()
                     delay(500)
@@ -1418,9 +1558,19 @@ class SpotifyViewModel(
                 contextUri == "spotify:user:me:collection" ||
                 (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri))
             ) {
-                playResolvedTrackList(_detailTracks.value.drop(index))
+                playResolvedTrackList(
+                    tracks = _detailTracks.value.drop(index),
+                    rememberedContextUri = contextUri
+                )
             } else {
                 playbackController.play(trackUri = trackUri, contextUri = contextUri, offsetPosition = index)
+            }
+            if (success) {
+                val rememberedTracks = when {
+                    contextUri == "spotify:user:me:collection" -> _detailTracks.value.drop(index)
+                    else -> tracksForContext(contextUri)
+                }
+                rememberPlaybackContext(contextUri, rememberedTracks)
             }
             _deviceNotFoundError.value = !success
             delay(500)
@@ -1951,7 +2101,9 @@ class SpotifyViewModel(
         _detailEpisodes.value = emptyList()
         _detailChapters.value = emptyList()
         _detailError.value = null
+        _upNext.value = emptyList()
         _queue.value = emptyList()
+        clearRememberedPlaybackContext()
         _followedArtists.value = emptyList()
         _artistTopTracks.value = emptyList()
         _artistAlbums.value = emptyList()
@@ -2188,6 +2340,9 @@ class SpotifyViewModel(
             _detailTracks.value = recommendedTracks
             val uris = resolveTrackUrisForPlayback(recommendedTracks)
             val success = uris.isNotEmpty() && playbackController.play(uris = uris)
+            if (success) {
+                rememberPlaybackContext("radio:$source", recommendedTracks)
+            }
             _deviceNotFoundError.value = !success
             if (success) {
                 _isOffline.value = false
@@ -2203,9 +2358,45 @@ class SpotifyViewModel(
         }
     }
 
-    private suspend fun playResolvedTrackList(tracks: List<SpotifyTrack>): Boolean {
+    private suspend fun playResolvedTrackList(
+        tracks: List<SpotifyTrack>,
+        rememberedContextUri: String? = null
+    ): Boolean {
         val uris = resolveTrackUrisForPlayback(tracks)
-        return uris.isNotEmpty() && playbackController.play(uris = uris)
+        val success = uris.isNotEmpty() && playbackController.play(uris = uris)
+        if (success && !rememberedContextUri.isNullOrBlank()) {
+            rememberPlaybackContext(rememberedContextUri, tracks)
+        } else if (success) {
+            clearRememberedPlaybackContext()
+        }
+        return success
+    }
+
+    private suspend fun buildEnhancedPlaylistSequence(tracks: List<SpotifyTrack>): List<SpotifyTrack> {
+        if (tracks.isEmpty()) return emptyList()
+
+        val enhanced = mutableListOf<SpotifyTrack>()
+        val seenUris = mutableSetOf<String>()
+
+        tracks.chunked(ENHANCED_PLAYLIST_GROUP_SIZE).forEach { chunk ->
+            chunk.forEach { track ->
+                if (seenUris.add(track.uri)) {
+                    enhanced += track
+                }
+            }
+
+            val seedTrackIds = chunk.mapNotNull { it.id }.distinct().take(5)
+            if (seedTrackIds.isEmpty()) return@forEach
+
+            val recommendations = libraryRepository
+                .getRecommendations(seedTrackIds, limit = 10)
+                .filter { recommendation -> seenUris.add(recommendation.uri) }
+                .take(ENHANCED_PLAYLIST_RECOMMENDATIONS_PER_GROUP)
+
+            enhanced += recommendations
+        }
+
+        return enhanced.take(MAX_QUEUE_BATCH)
     }
 
     private suspend fun enqueueUris(uris: List<String>) {

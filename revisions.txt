@@ -1,4 +1,31 @@
 ═══════════════════════════════════════════════════════════════
+ R5.15  —  2026-03-23
+═══════════════════════════════════════════════════════════════
+ Summary: Audited the open GitHub issue list, marked completed fixes, and implemented the remaining queue/Now Playing/playlist enhancements
+
+ Changes:
+   • Audited the repository's open GitHub issues and confirmed the previously requested items for ±15-second spoken-word skip, day/night dark-mode sync, and per-track/per-context Add to Queue were already implemented in the app code
+   • Split Queue into derived `Up Next` and `Spotify Queue` sections, using playlist/album ordering when known and podcast-aware fallback logic that prefers the next most recent unplayed episode before falling back to Spotify-provided queue suggestions
+   • Updated Now Playing to show elapsed + remaining time, increased metadata contrast/sizing for smaller labels, and renamed the queue entry point to reflect the new Queue/Up Next split
+   • Added a playlist `Enhance` action that interleaves every five playlist tracks with two Spotify recommendations before playback starts
+
+ Files Modified:
+   • README.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/components/PlayerControls.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/NowPlayingScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/PlaylistDetailScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/QueueScreen.kt
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.14  —  2026-03-22
 ═══════════════════════════════════════════════════════════════
  Summary: Added AVRCP Bluetooth kickstart recovery and passive device memorization for sleeping phones
