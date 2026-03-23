@@ -216,6 +216,12 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 6. **Expected**: Track removed from the local queue display (SwipeToDismiss animation)
 7. **Expected**: Requires a deliberate long horizontal drag (~50% width); diagonal scroll gestures do not dismiss
 
+#### TC-08B: Queue Screen Podcast Polling Regression
+1. Start podcast playback, then open **Queue**
+2. Leave the Queue screen open for at least 30 seconds while playback continues
+3. **Expected**: The app does not repeatedly fetch `GET /v1/shows/{id}/episodes` on every metadata poll once the current show's episode slice has been cached for the playback session
+4. **Expected**: **Up Next** remains populated from the cached episode list unless the active show changes
+
 #### TC-13: Library Tab Persistence
 1. Navigate to Library and select **Podcasts** (or any non-default tab)
 2. Open a podcast/detail screen from that tab

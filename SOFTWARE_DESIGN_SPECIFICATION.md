@@ -511,6 +511,7 @@ Displays the upcoming playback queue with a grid/list toggle:
 - **Now Playing card**: Prominent row at the top with 100 dp album art and green "NOW PLAYING" label.
 - **Up Next vs Queue split**: The ViewModel derives a separate **Up Next** section from the active playback context (playlist/album ordering or next unplayed podcast episodes) and leaves explicit/manual Spotify queue items in a dedicated **Spotify Queue** section.
 - **Podcast fallback**: If the active podcast has no more unplayed newer-to-older episodes after the current episode, the **Up Next** section falls back to Spotify's queue suggestions.
+- **Podcast-context cache**: To avoid 429 risk while Queue remains open, podcast `Up Next` derivation caches the fetched episode slice for the currently playing show and reuses it across metadata polling ticks until playback context changes.
 - **Podcast + audiobook support**: Queue items use `SpotifyPlayableItem` which unifies tracks, episodes, and chapters. Album art falls back to item → episode/chapter → album/show/audiobook imagery. Subtitle shows publisher/generic podcast text for episodes, author for audiobook chapters, and artist for tracks.
 
 ### 4.4 Component Library

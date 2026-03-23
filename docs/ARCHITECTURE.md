@@ -217,7 +217,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 
 **Playable metadata policy**: `SpotifyPlayableItem` now models Spotify `track`, `episode`, and `chapter` payloads so Queue, MiniPlayer, and Now Playing can render podcast and audiobook content without type-cast assumptions. Playlist detail loading now consumes Spotify's February 2026 `items.item` payload and maps track rows from that generic item container.
 
-**High-volume request audit**: The worst offenders were (1) metadata polling plus per-poll saved-track checks, (2) Home playlist suggestion loading forcing a full playlist refresh, and (3) recently played context hydration fanning out into per-item playlist/album fetches. The current architecture now caches or reuses in-memory results for those flows first, while leaving the podcast-freshness fan-out deliberately bounded because it powers a visible Home badge feature.
+**High-volume request audit**: The worst offenders were (1) metadata polling plus per-poll saved-track checks, (2) Home playlist suggestion loading forcing a full playlist refresh, and (3) recently played context hydration fanning out into per-item playlist/album fetches. The current architecture now caches or reuses in-memory results for those flows first. Queue's podcast-aware **Up Next** derivation also caches the active show's fetched episode slice for the current playback session so leaving the Queue screen open during podcast playback does not hammer `GET /v1/shows/{id}/episodes` on every 3-4 second metadata tick.
 
 ### 3.3 Automotive UI Scaling
 

@@ -323,6 +323,8 @@ class SpotifyViewModel(
     val queue: StateFlow<List<SpotifyPlayableItem>> = _queue
 
     private var lastPlaybackContextTracks: List<SpotifyTrack> = emptyList()
+    private var lastPlaybackContextEpisodes: List<SpotifyEpisode> = emptyList()
+    private var lastPlaybackContextShowId: String? = null
 
     // ── Artists ──────────────────────────────────────────────────────
 
@@ -1352,8 +1354,18 @@ class SpotifyViewModel(
     private suspend fun derivePodcastUpNext(currentItem: SpotifyPlayableItem): List<SpotifyPlayableItem> {
         val showId = currentItem.show?.id ?: return emptyList()
         val episodes = when {
-            (_currentScreen.value as? Screen.PodcastDetail)?.id == showId && _detailEpisodes.value.isNotEmpty() -> _detailEpisodes.value
-            else -> libraryRepository.getShowEpisodes(showId = showId, maxEpisodes = MAX_UP_NEXT_ITEMS + 5)
+            (_currentScreen.value as? Screen.PodcastDetail)?.id == showId && _detailEpisodes.value.isNotEmpty() -> {
+                lastPlaybackContextShowId = showId
+                lastPlaybackContextEpisodes = _detailEpisodes.value
+                _detailEpisodes.value
+            }
+            lastPlaybackContextShowId == showId && lastPlaybackContextEpisodes.isNotEmpty() -> lastPlaybackContextEpisodes
+            else -> {
+                val fetched = libraryRepository.getShowEpisodes(showId = showId, maxEpisodes = MAX_UP_NEXT_ITEMS + 5)
+                lastPlaybackContextShowId = showId
+                lastPlaybackContextEpisodes = fetched
+                fetched
+            }
         }
         if (episodes.isEmpty()) return emptyList()
 
@@ -1392,6 +1404,8 @@ class SpotifyViewModel(
 
     private fun clearRememberedPlaybackContext() {
         lastPlaybackContextTracks = emptyList()
+        lastPlaybackContextEpisodes = emptyList()
+        lastPlaybackContextShowId = null
     }
 
     private fun tracksForContext(contextUri: String?): List<SpotifyTrack> = when {

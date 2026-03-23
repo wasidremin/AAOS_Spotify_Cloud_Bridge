@@ -1,4 +1,27 @@
 ═══════════════════════════════════════════════════════════════
+ R5.16  —  2026-03-23
+═══════════════════════════════════════════════════════════════
+ Summary: Fixed Queue screen podcast polling so Up Next episode derivation no longer refetches show episodes every metadata tick
+
+ Changes:
+   • Reviewed the recent Queue / Up Next changes and confirmed the major regression risk: leaving Queue open during podcast playback could refetch `GET /v1/shows/{id}/episodes` every 3-4 seconds
+   • Added a playback-session cache for the active podcast's episode slice in `SpotifyViewModel` so Queue can reuse fetched show episodes instead of re-hitting Spotify on every poll
+   • Updated architecture, testing, and runtime-resiliency docs to capture the new podcast-context cache and the regression scenario it prevents
+
+ Files Modified:
+   • README.md
+  • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.15  —  2026-03-23
 ═══════════════════════════════════════════════════════════════
  Summary: Audited the open GitHub issue list, marked completed fixes, and implemented the remaining queue/Now Playing/playlist enhancements
