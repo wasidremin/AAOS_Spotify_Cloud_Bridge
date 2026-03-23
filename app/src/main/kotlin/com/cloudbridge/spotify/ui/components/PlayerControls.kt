@@ -29,9 +29,9 @@ import kotlinx.coroutines.isActive
  *    Supports drag-seeking: while the user drags, `isSeeking` is `true`
  *    and the local `seekPosition` drives the slider instead of [progressMs].
  * 2. **Time labels** — elapsed (left) and remaining (right).
- * 3. **Primary control row** — Shuffle · Previous · Play/Pause · Next · Repeat.
- *    Touch targets are 48–72 dp to meet AAOS accessibility guidelines.
- * 4. **Secondary row** — Radio (seed recommendations) and Heart (save/unsave).
+ * 3. **Primary control row** — Previous · optional −15s · Play/Pause · optional +15s · Next.
+ *    Spoken-word skip buttons sit beside the core transport controls to better match in-car media layouts.
+ * 4. **Secondary row** — Shuffle · Repeat · Radio (seed recommendations) · Heart (save/unsave).
  *
  * @param isPlaying     Whether playback is currently active.
  * @param shuffleEnabled Whether shuffle mode is on.
@@ -120,25 +120,12 @@ fun PlayerControls(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier.fillMaxWidth()
     ) {
-        // ── Main Controls (Shuffle, Prev, Play, Next, Repeat) ───────
+        // ── Main Controls (Prev, optional ±15, Play, Next) ──────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Shuffle
-            IconButton(
-                onClick = onShuffle,
-                modifier = Modifier.size(80.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Shuffle,
-                    contentDescription = "Shuffle",
-                    tint = if (shuffleEnabled) SpotifyGreen else SpotifyLightGray,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-
             // Previous
             IconButton(
                 onClick = onPrevious,
@@ -150,6 +137,14 @@ fun PlayerControls(
                     tint = SpotifyWhite,
                     modifier = Modifier.size(64.dp)
                 )
+            }
+
+            if (showSkipButtons) {
+                OutlinedButton(onClick = onSkipBack15, modifier = Modifier.defaultMinSize(minWidth = 88.dp)) {
+                    Text("−15s", color = SpotifyWhite)
+                }
+            } else {
+                Spacer(modifier = Modifier.width(88.dp))
             }
 
             // Play / Pause (largest — prominent center button)
@@ -168,6 +163,14 @@ fun PlayerControls(
                 )
             }
 
+            if (showSkipButtons) {
+                OutlinedButton(onClick = onSkipForward15, modifier = Modifier.defaultMinSize(minWidth = 88.dp)) {
+                    Text("+15s", color = SpotifyWhite)
+                }
+            } else {
+                Spacer(modifier = Modifier.width(88.dp))
+            }
+
             // Next
             IconButton(
                 onClick = onNext,
@@ -180,11 +183,28 @@ fun PlayerControls(
                     modifier = Modifier.size(64.dp)
                 )
             }
+        }
 
-            // Repeat
+        // ── Secondary Controls (Shuffle, Repeat, Radio, Heart) ──────
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onShuffle,
+                modifier = Modifier.size(72.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Shuffle,
+                    contentDescription = "Shuffle",
+                    tint = if (shuffleEnabled) SpotifyGreen else SpotifyLightGray,
+                    modifier = Modifier.size(40.dp)
+                )
+            }
+
             IconButton(
                 onClick = onRepeat,
-                modifier = Modifier.size(80.dp)
+                modifier = Modifier.size(72.dp)
             ) {
                 Icon(
                     imageVector = when (repeatMode) {
@@ -193,23 +213,8 @@ fun PlayerControls(
                     },
                     contentDescription = "Repeat",
                     tint = if (repeatMode != "off") SpotifyGreen else SpotifyLightGray,
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(40.dp)
                 )
-            }
-        }
-
-        // ── Secondary Controls (Radio, Heart) ───────────────────────
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            if (showSkipButtons) {
-                OutlinedButton(onClick = onSkipBack15) {
-                    Text("−15s", color = SpotifyWhite)
-                }
-                OutlinedButton(onClick = onSkipForward15) {
-                    Text("+15s", color = SpotifyWhite)
-                }
             }
 
             IconButton(

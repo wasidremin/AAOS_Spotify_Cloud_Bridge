@@ -188,8 +188,9 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 4. **Expected**: Seek slider shows current position
 5. **Expected**: Bottom time labels show elapsed time on the left and remaining time on the right (not total duration)
 6. **Expected**: Smaller metadata text remains readable against bright album art because the subtitle and collection labels render on darker contrast chips
-5. Tap the collapse chevron
-6. **Expected**: Now Playing slides down, MiniPlayer returns
+7. While a podcast or audiobook chapter is playing, **Expected**: the top transport row reads `Previous · −15s · Play/Pause · +15s · Next`, and shuffle/repeat move to the second row with Radio and Heart
+8. Tap the collapse chevron
+9. **Expected**: Now Playing slides down, MiniPlayer returns
 
 #### TC-06: Playback Controls
 1. On Now Playing screen, tap Pause
@@ -221,6 +222,13 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 2. Leave the Queue screen open for at least 30 seconds while playback continues
 3. **Expected**: The app does not repeatedly fetch `GET /v1/shows/{id}/episodes` on every metadata poll once the current show's episode slice has been cached for the playback session
 4. **Expected**: **Up Next** remains populated from the cached episode list unless the active show changes
+5. **Expected**: `GET /v1/me/player/queue` is not spammed every 2 seconds while Queue remains open; steady-state refreshes are throttled unless the active playback item changes
+
+#### TC-08C: Long Podcast Sync Resilience
+1. Start a long podcast episode and confirm Now Playing is updating
+2. Leave the app open during playback for several minutes, including one period where Spotify briefly stops returning player metadata
+3. **Expected**: The UI continues showing the last known episode/chapter and advances the progress locally instead of immediately dropping to a disconnected/paused state
+4. **Expected**: If Spotify resumes reporting within roughly 2 minutes, the UI re-locks to the authoritative player state without user intervention
 
 #### TC-13: Library Tab Persistence
 1. Navigate to Library and select **Podcasts** (or any non-default tab)

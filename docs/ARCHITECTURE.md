@@ -184,12 +184,16 @@ detail tracks use progressive loading — each page is appended to the
 StateFlow immediately, so the UI renders the first batch while subsequent
 pages load in the background.
 
-**Metadata sync loop**: Polls `GET /v1/me/player` every 3 seconds to keep
+**Metadata sync loop**: Polls `GET /v1/me/player` every 3 seconds (2 seconds for spoken-word playback) to keep
 the Now Playing UI in sync (moved from the deleted CloudBridgePlayer).
 Network exceptions (`UnknownHostException`, `SocketTimeoutException`) toggle
 `isOffline`, which drives a top-of-screen reconnect banner.
 HTTP 401/403 errors from content endpoints set `requiresReauth`, which shows a
 user-facing banner with a direct link to Setup.
+
+**Long-podcast blind-spot policy**: Spoken-word sessions can temporarily disappear from Spotify's player endpoint even while Bluetooth audio continues on the phone. `SpotifyViewModel` now preserves the last known podcast/chapter playback state for up to 2 minutes, keeps the local progress ticking forward, and only logs the blind-spot warning at a throttled cadence so long drives do not collapse into a false “not connected” state after a short reporting gap.
+
+**Queue refresh throttle**: While the Queue screen is visible, `syncQueueState()` no longer runs on every metadata tick. Playback-item changes still trigger an immediate queue refresh, but steady-state Queue polling is limited to a 15-second cadence so the screen stays fresh without turning the player endpoint plus queue endpoint into a high-frequency request pair.
 
 **Passive device registration + AVRCP wakeup**: When playback metadata reports an active device, `SpotifyViewModel` now forwards that device ID/name to `DeviceManager.registerActiveDevice()` so the last confirmed phone target stays cached. If a playback command still fails, the ViewModel dispatches a native `KEYCODE_MEDIA_PLAY` down/up pair via Android `AudioManager`, waits 2 seconds, refreshes device discovery, and retries the command once.
 
@@ -217,7 +221,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 
 **Playable metadata policy**: `SpotifyPlayableItem` now models Spotify `track`, `episode`, and `chapter` payloads so Queue, MiniPlayer, and Now Playing can render podcast and audiobook content without type-cast assumptions. Playlist detail loading now consumes Spotify's February 2026 `items.item` payload and maps track rows from that generic item container.
 
-**High-volume request audit**: The worst offenders were (1) metadata polling plus per-poll saved-track checks, (2) Home playlist suggestion loading forcing a full playlist refresh, and (3) recently played context hydration fanning out into per-item playlist/album fetches. The current architecture now caches or reuses in-memory results for those flows first. Queue's podcast-aware **Up Next** derivation also caches the active show's fetched episode slice for the current playback session so leaving the Queue screen open during podcast playback does not hammer `GET /v1/shows/{id}/episodes` on every 3-4 second metadata tick.
+**High-volume request audit**: The worst offenders were (1) metadata polling plus per-poll saved-track checks, (2) Home playlist suggestion loading forcing a full playlist refresh, and (3) recently played context hydration fanning out into per-item playlist/album fetches. The current architecture now caches or reuses in-memory results for those flows first. Queue's podcast-aware **Up Next** derivation also caches the active show's fetched episode slice for the current playback session, and Queue refreshes are throttled while the screen is open, so spoken-word playback no longer layers `GET /v1/me/player/queue` plus `GET /v1/shows/{id}/episodes` on every 2-second metadata tick.
 
 ### 3.3 Automotive UI Scaling
 

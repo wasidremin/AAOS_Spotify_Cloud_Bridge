@@ -101,7 +101,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 | **Search** | Dedicated automotive search tab with large text field, 4-column results grid, and long-press actions for queueing albums/playlists/tracks or pinning results |
 | **Library** | Playlists / Albums / Artists / Podcasts tabs with local sort + filter controls, plus tab state preserved across back navigation |
 | **Add Profile** | Smart-TV-style QR onboarding screen with a 6-character session code, QR code, and cloud-relay completion polling |
-| **Now Playing** | Blurred background, higher-contrast metadata chips, hero album art, larger explicit badge, live liked-song heart sync, elapsed + remaining time labels, ±15 second skip for spoken-word playback, Start Radio, and chapter-safe audiobook metadata |
+| **Now Playing** | Blurred background, higher-contrast metadata chips, hero album art, larger explicit badge, live liked-song heart sync, elapsed + remaining time labels, a CarPlay-style spoken-word transport row (`Previous · −15s · Play/Pause · +15s · Next`), and chapter-safe audiobook metadata |
 | **Queue** | Separate Up Next and Spotify Queue sections with higher drag-threshold swipe dismissal for queued items; supports tracks, podcast episodes, and audiobook chapters, plus long-press queueing from Search, Library, playlists, albums, and podcast episodes |
 | **Playlist Detail** | Track list with larger tap targets, explicit badges, now-playing speaker indicator, one-tap queueing, Start Radio, and an Enhance action that interleaves playlist tracks with recommendations in a 5:2 pattern |
 
@@ -146,6 +146,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Search uses a 750ms debounce and `imePadding()` so the on-screen keyboard does not obscure results.
 - Playlist/Artist detail rows show a speaker icon for the active track (not color-only), improving glanceability.
 - Queue now splits derived **Up Next** items from the raw Spotify queue, so podcasts can surface the next most recent unplayed episodes before falling back to Spotify-provided queue suggestions.
+- Long-form podcast playback now tolerates up to two minutes of temporary Spotify player blind spots before the UI gives up, and Queue refreshes are throttled while the Queue screen is left open so the app keeps sync without hammering Spotify.
 - MiniPlayer width is responsive (`fillMaxWidth(0.55f)` with `widthIn(max = 600.dp)`) for split-screen resilience and increased to 112dp height with 88dp album art and 52dp play/pause icon for better automotive visibility.
 - Podcast episodes and audiobook chapters in Queue, Now Playing, and MiniPlayer use `SpotifyPlayableItem` with artwork fallback chain (item images → album/show/audiobook) and type-aware subtitle text, and Library now includes a dedicated Audiobooks tab plus chapter-detail screen.
 

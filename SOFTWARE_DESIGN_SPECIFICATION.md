@@ -494,11 +494,12 @@ Scrollable track list with:
 Overlay that slides up via `AnimatedVisibility(slideInVertically)`. **Only covers the content area** — the NavigationRail remains visible and functional during playback.
 
 Split-screen `Row` layout:
-- **Left column** (weight 1f): Collapse chevron, track title, artist, full `PlayerControls` (progress slider, shuffle/prev/play/next/repeat, radio/heart).
+- **Left column** (weight 1f): Collapse chevron, track title, artist, full `PlayerControls` (progress slider, primary transport row, secondary toggle/actions row).
 - **Right column** (weight 1f): Crisp album art at 1:1 aspect ratio with 16 dp rounded corners.
 - **Background**: Blurred album art (25 dp blur) + adaptive dark scrim that becomes heavier in night mode.
 - **Contrast treatment**: Subtitle + album/show labels sit on semi-opaque dark chips so smaller metadata remains readable against bright artwork.
 - **Time labels**: `PlayerControls` now render elapsed time on the left and remaining time on the right.
+- **Control layout**: Spoken-word playback uses a CarPlay-like first row (`Previous · −15s · Play/Pause · +15s · Next`) while shuffle/repeat move into the second row alongside Radio and Heart.
 
 #### Queue Screen
 

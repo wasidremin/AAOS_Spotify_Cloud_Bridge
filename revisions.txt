@@ -1,4 +1,30 @@
 ═══════════════════════════════════════════════════════════════
+ R5.17  —  2026-03-23
+═══════════════════════════════════════════════════════════════
+ Summary: Reworked Now Playing transport layout and hardened long-podcast metadata sync / Queue polling
+
+ Changes:
+   • Reworked `PlayerControls` so spoken-word playback now shows `Previous · −15s · Play/Pause · +15s · Next` on the main row, with shuffle/repeat moved to the secondary row beside Radio and Heart to better match in-car layouts
+   • Extended spoken-word blind-spot tolerance to 2 minutes so temporary Spotify player gaps no longer make long podcasts look disconnected while Bluetooth audio is still active
+   • Throttled steady-state Queue refreshes while the Queue screen remains open so metadata polling no longer triggers `GET /v1/me/player/queue` on every 2-second podcast tick
+   • Suppressed benign podcast-freshness cancellation warnings during overlapping show refreshes so emulator logcat stays focused on actionable playback/sync problems
+   • Updated architecture/testing/spec docs to cover the new control layout and the long-podcast sync resilience rules
+
+ Files Modified:
+   • README.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/components/PlayerControls.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.16  —  2026-03-23
 ═══════════════════════════════════════════════════════════════
  Summary: Fixed Queue screen podcast polling so Up Next episode derivation no longer refetches show episodes every metadata tick

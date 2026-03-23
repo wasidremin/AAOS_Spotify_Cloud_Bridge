@@ -163,8 +163,9 @@ class SpotifyViewModel(
         private const val TAG = "SpotifyViewModel"
         private const val METADATA_POLL_MS = 3000L
         private const val PODCAST_METADATA_POLL_MS = 2000L
-        private const val PODCAST_NULL_TOLERANCE_MS = 20_000L
+        private const val PODCAST_NULL_TOLERANCE_MS = 120_000L
         private const val PODCAST_RETRY_DELAY_MS = 750L
+        private const val QUEUE_VISIBLE_REFRESH_MS = 15_000L
         private const val BLUETOOTH_KICKSTART_DELAY_MS = 2000L
         private const val SAVED_STATUS_REFRESH_MS = 15_000L
         private const val MAX_QUEUE_BATCH = 100
@@ -408,6 +409,8 @@ class SpotifyViewModel(
     private var lastSavedStatusTrackUri: String? = null
     private var lastSavedStatusCheckedAtMs: Long = 0L
     private var lastSuccessfulPlaybackSyncAtMs: Long = 0L
+    private var lastQueueSyncAtMs: Long = 0L
+    private var lastPodcastBlindSpotLoggedAtMs: Long = 0L
 
     // ── Metadata Sync ────────────────────────────────────────────────
 
@@ -1172,6 +1175,8 @@ class SpotifyViewModel(
                 latestEpisodeName = episodes.firstOrNull()?.name,
                 latestEpisodeReleaseDate = episodes.firstOrNull()?.releaseDate
             )
+        } catch (_: CancellationException) {
+            null
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load podcast freshness for ${show.name}: ${e.message}")
             null
@@ -1324,9 +1329,16 @@ class SpotifyViewModel(
             _queue.value = normalizedQueue.filterNot { queuedItem ->
                 derivedUpNext.any { upNextItem -> upNextItem.uri == queuedItem.uri }
             }
+            lastQueueSyncAtMs = System.currentTimeMillis()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load queue: ${e.message}")
         }
+    }
+
+    private fun shouldRefreshQueue(playbackItemChanged: Boolean): Boolean {
+        if (playbackItemChanged) return true
+        if (_currentScreen.value !is Screen.Queue) return false
+        return (System.currentTimeMillis() - lastQueueSyncAtMs) >= QUEUE_VISIBLE_REFRESH_MS
     }
 
     private fun normalizeQueue(queueItems: List<SpotifyPlayableItem>, currentUri: String?): List<SpotifyPlayableItem> {
@@ -1955,10 +1967,11 @@ class SpotifyViewModel(
                 }
                 _playbackState.value = playback
                 lastSuccessfulPlaybackSyncAtMs = System.currentTimeMillis()
+                lastPodcastBlindSpotLoggedAtMs = 0L
                 val currentItemUri = playback.item?.uri
                 val playbackItemChanged = currentItemUri != previousItemUri
 
-                if (_currentScreen.value is Screen.Queue || playbackItemChanged) {
+                if (shouldRefreshQueue(playbackItemChanged)) {
                     syncQueueState(currentItemUri)
                 }
 
@@ -1980,6 +1993,11 @@ class SpotifyViewModel(
                     (System.currentTimeMillis() - lastSuccessfulPlaybackSyncAtMs) < PODCAST_NULL_TOLERANCE_MS
 
                 if (withinPodcastTolerance) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastPodcastBlindSpotLoggedAtMs >= 15_000L) {
+                        Log.i(TAG, "Playback blind spot during podcast metadata sync; preserving local state until Spotify resumes reporting")
+                        lastPodcastBlindSpotLoggedAtMs = now
+                    }
                     _playbackState.update { current ->
                         val currentProgress = current?.progressMs ?: 0L
                         current?.copy(
@@ -2117,6 +2135,8 @@ class SpotifyViewModel(
         _detailError.value = null
         _upNext.value = emptyList()
         _queue.value = emptyList()
+        lastQueueSyncAtMs = 0L
+        lastPodcastBlindSpotLoggedAtMs = 0L
         clearRememberedPlaybackContext()
         _followedArtists.value = emptyList()
         _artistTopTracks.value = emptyList()
