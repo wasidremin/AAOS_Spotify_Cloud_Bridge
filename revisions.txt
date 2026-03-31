@@ -1,4 +1,23 @@
 ═══════════════════════════════════════════════════════════════
+ R5.28  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Release build v2.8.4 — bumped the publish version after Play rejected versionCode 18 as already used
+
+ Changes:
+   • Bumped `versionCode` from `18` to `19` so the release is installable/publishable after the prior code was already consumed
+   • Bumped `versionName` from `2.8.3` to `2.8.4` to keep the published release label aligned with the new bundle metadata
+   • Rebuilt the signed release AAB with the corrected publish version
+
+ Files Modified:
+   • app/build.gradle.kts
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.27  —  2026-03-31
 ═══════════════════════════════════════════════════════════════
  Summary: Release build v2.8.3 — published the logging and startup/cache hardening set and generated the signed AAB
