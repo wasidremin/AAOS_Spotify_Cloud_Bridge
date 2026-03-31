@@ -2,13 +2,19 @@ package com.cloudbridge.spotify.domain
 
 import com.cloudbridge.spotify.data.CustomMixDataSource
 import com.cloudbridge.spotify.network.model.SpotifyShow
+import com.cloudbridge.spotify.util.AppLogger
 
 class CustomMixEngine(
     private val dataSource: CustomMixDataSource,
     private val maxGeneratedUris: Int = 100
 ) {
 
+    companion object {
+        private const val TAG = "CustomMixEngine"
+    }
+
     suspend fun buildDecadeMix(decadePrefix: String): List<String> {
+        AppLogger.d(TAG, "Building decade mix: prefix=$decadePrefix")
         val ownedTracks = dataSource.getSavedTracks(maxTracks = 200)
             .filter { track ->
                 track.uri.isNotBlank() && track.album?.releaseDate?.startsWith(decadePrefix) == true
@@ -28,6 +34,7 @@ class CustomMixEngine(
     }
 
     suspend fun buildDailyDrive(newsShowId: String, savedShows: List<SpotifyShow>? = null): List<String> {
+        AppLogger.d(TAG, "Building Daily Drive: newsShowId=$newsShowId")
         val shows = savedShows ?: dataSource.getSavedShows()
         val podcastEpisodeUris = buildList {
             dataSource.getLatestEpisodeUri(newsShowId)?.let(::add)

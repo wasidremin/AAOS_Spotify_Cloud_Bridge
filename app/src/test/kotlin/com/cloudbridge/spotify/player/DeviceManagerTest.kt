@@ -56,7 +56,7 @@ class DeviceManagerTest {
     }
 
     @Test
-    fun `getPhoneDeviceId returns null when no smartphones and no locked device`() = runTest {
+    fun `getPhoneDeviceId falls back to active unrestricted device when no smartphone is visible`() = runTest {
         coEvery { apiService.getDevices() } returns DevicesResponse(
             devices = listOf(
                 SpotifyDevice(id = "speaker_1", name = "Speaker", type = "Speaker", isActive = true, isRestricted = false, volumePercent = 50),
@@ -66,7 +66,7 @@ class DeviceManagerTest {
 
         val deviceId = deviceManager.getPhoneDeviceId()
 
-        assertNull(deviceId)
+        assertEquals("speaker_1", deviceId)
     }
 
     @Test
@@ -115,5 +115,15 @@ class DeviceManagerTest {
         val deviceId = deviceManager.getPhoneDeviceId()
 
         assertNull(deviceId)
+    }
+
+    @Test
+    fun `refreshDeviceId falls back to remembered device during temporary discovery blind spot`() = runTest {
+        deviceManager.registerActiveDevice(id = "phone_1", name = "My Phone")
+        coEvery { apiService.getDevices() } returns DevicesResponse(devices = emptyList())
+
+        val deviceId = deviceManager.refreshDeviceId()
+
+        assertEquals("phone_1", deviceId)
     }
 }

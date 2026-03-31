@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.cloudbridge.spotify.network.model.CurrentPlaybackResponse
 import com.cloudbridge.spotify.network.model.SpotifyPlayableItem
+import com.cloudbridge.spotify.ui.QueueItem
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.components.AlbumArtTile
 import com.cloudbridge.spotify.ui.theme.*
@@ -154,9 +155,9 @@ fun QueueScreen(
                         }
                         itemsIndexed(
                             items = queue,
-                            key = { index, item -> "grid-queue-${item.id}-$index" }
+                            key = { _, item -> item.uniqueId }
                         ) { _, item ->
-                            QueueGridTile(item = item, onClick = { viewModel.playTrack(item.uri) })
+                            QueueGridTile(item = item.track, onClick = { viewModel.playTrack(item.track.uri) })
                         }
                     }
                 }
@@ -193,13 +194,13 @@ fun QueueScreen(
                         }
                         itemsIndexed(
                             items = queue,
-                            key = { index, item -> "list-queue-${item.id}-$index" }
-                        ) { index, item ->
+                            key = { _, item -> item.uniqueId }
+                        ) { _, item ->
                             val dismissState = rememberSwipeToDismissBoxState(
                                 positionalThreshold = { totalDistance -> totalDistance * 0.5f },
                                 confirmValueChange = { value ->
                                     if (value != SwipeToDismissBoxValue.Settled) {
-                                        viewModel.removeFromQueue(index)
+                                        viewModel.removeFromQueue(item.uniqueId)
                                         true
                                     } else false
                                 }
@@ -232,9 +233,9 @@ fun QueueScreen(
                                 },
                                 content = {
                                     QueueTrackRow(
-                                        item = item,
+                                        item = item.track,
                                         isCurrentlyPlaying = false,
-                                        onClick = { viewModel.playTrack(item.uri) }
+                                        onClick = { viewModel.playTrack(item.track.uri) }
                                     )
                                 }
                             )

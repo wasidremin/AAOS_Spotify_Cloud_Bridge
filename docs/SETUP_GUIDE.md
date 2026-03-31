@@ -271,3 +271,47 @@ Example filter:
 ```bash
 adb logcat -s SpotifyViewModel:* SpotifyPlaybackController:* DeviceManager:*
 ```
+
+## 10. In-App Logging
+
+Cloud-Bridge includes an internal file-based logger (`AppLogger`) that can be enabled at runtime from **Settings > Logging**.
+
+### Enabling Logging
+
+1. Open the app and go to **Settings** (gear icon).
+2. Scroll to the **Logging** section.
+3. Toggle **Enable Logging** on.
+
+When enabled, every API call, auth event, playback command, device discovery result, and error is written to a timestamped log file in addition to the standard Android logcat. The logger buffers entries in memory and flushes them to disk periodically to minimize I/O overhead.
+
+### What Gets Logged
+
+| Category | Details |
+|----------|---------|
+| **API calls** | Every Spotify Web API request/response (`→ GET /v1/me/playlists`, `← 200`) |
+| **Auth / tokens** | Token refresh attempts and outcomes, rate limit lockouts |
+| **Playback** | Play, pause, skip, seek, shuffle, repeat commands with device IDs |
+| **Device discovery** | Found devices, priority selection, cache hits/misses, locked device usage |
+| **Profile management** | Active profile switches, QR onboarding sessions, credential saves |
+| **Library cache** | Playlist/album/show refresh counts, cache clears on profile switch |
+| **Errors** | HTTP 401/403/404/429 errors, network exceptions, playback failures |
+
+### Exporting Logs
+
+1. In **Settings > Logging**, tap **Export**.
+2. On AAOS builds, Cloud-Bridge opens the system document picker and asks where to save `cloudbridge_logs_export.txt`.
+3. Choose a USB drive or another writable document location.
+4. On non-AAOS images that do not expose a document picker, Cloud-Bridge falls back to Android's share sheet.
+
+The AAOS emulator image used by this project does not ship any `ACTION_SEND` targets for `text/plain`, so USB export uses the document picker rather than the share chooser.
+
+### Log File Details
+
+- **Location**: `files/logs/cloudbridge.log` (app-private internal storage)
+- **Max size**: 5 MB per file, auto-rotated. Up to 5 rotated files are kept.
+- **Format**: `YYYY-MM-DD HH:mm:ss.SSS LEVEL/TAG: message`
+- **Clear**: Tap **Clear** in Settings to delete all log files.
+
+### Privacy
+
+Log files contain Spotify API endpoint paths, HTTP status codes, device names, and profile names. They do **not** contain OAuth tokens, passwords, or Bearer header values. Review the export before sharing externally.

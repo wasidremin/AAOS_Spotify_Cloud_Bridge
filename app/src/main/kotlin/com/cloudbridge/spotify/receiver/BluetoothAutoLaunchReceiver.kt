@@ -4,8 +4,8 @@ import android.bluetooth.BluetoothDevice
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import com.cloudbridge.spotify.SpotifyCloudBridgeApp
+import com.cloudbridge.spotify.util.AppLogger
 import com.cloudbridge.spotify.ui.MainActivity
 import kotlinx.coroutines.launch
 
@@ -46,7 +46,7 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
         if (intent.action != BluetoothDevice.ACTION_ACL_CONNECTED) return
 
         val app = context.applicationContext as? SpotifyCloudBridgeApp ?: run {
-            Log.e(TAG, "Could not cast applicationContext to SpotifyCloudBridgeApp")
+            AppLogger.e(TAG, "Could not cast applicationContext to SpotifyCloudBridgeApp")
             return
         }
 
@@ -58,7 +58,7 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
                 val savedMac = app.tokenManager.getBtAutoLaunchMac()
 
                 if (savedMac.isNullOrBlank()) {
-                    Log.d(TAG, "BT auto-launch: no MAC configured, ignoring connection event")
+                    AppLogger.d(TAG, "BT auto-launch: no MAC configured, ignoring connection event")
                     return@launch
                 }
 
@@ -69,17 +69,17 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
                     device?.address?.uppercase()?.trim()
                 } catch (se: SecurityException) {
                     // BLUETOOTH_CONNECT permission not granted at runtime — skip
-                    Log.w(TAG, "Cannot read device address — BLUETOOTH_CONNECT not granted", se)
+                    AppLogger.w(TAG, "Cannot read device address — BLUETOOTH_CONNECT not granted", se)
                     null
                 }
 
                 if (deviceMac == null) {
-                    Log.d(TAG, "BT auto-launch: could not read device MAC, ignoring")
+                    AppLogger.d(TAG, "BT auto-launch: could not read device MAC, ignoring")
                     return@launch
                 }
 
                 if (deviceMac == savedMac) {
-                    Log.i(TAG, "BT auto-launch: matched $deviceMac — launching MainActivity")
+                    AppLogger.i(TAG, "BT auto-launch: matched $deviceMac — launching MainActivity")
                     val launchIntent = Intent(context, MainActivity::class.java).apply {
                         addFlags(
                             Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -89,7 +89,7 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
                     }
                     context.startActivity(launchIntent)
                 } else {
-                    Log.d(TAG, "BT auto-launch: $deviceMac ≠ $savedMac, ignoring")
+                    AppLogger.d(TAG, "BT auto-launch: $deviceMac ≠ $savedMac, ignoring")
                 }
             } finally {
                 pendingResult.finish()

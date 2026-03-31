@@ -15,9 +15,6 @@
         android:name="android.permission.BLUETOOTH_CONNECT"
         android:minSdkVersion="31" />
 
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-
     <!--
         Declares this app as compatible with AAOS, but allows installation
         on standard phones/tablets as well. The app will detect the platform
@@ -30,7 +27,6 @@
     <application
         android:name=".SpotifyCloudBridgeApp"
         android:allowBackup="false"
-        android:appCategory="audio"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:networkSecurityConfig="@xml/network_security_config"
@@ -89,6 +85,17 @@
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
             </intent-filter>
         </receiver>
+
+        <!-- FileProvider for exporting log files to USB / share intents -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
 
     </application>
 

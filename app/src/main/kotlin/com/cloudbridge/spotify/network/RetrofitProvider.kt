@@ -1,7 +1,7 @@
 package com.cloudbridge.spotify.network
 
-import android.util.Log
 import com.cloudbridge.spotify.BuildConfig
+import com.cloudbridge.spotify.util.AppLogger
 import com.cloudbridge.spotify.auth.AuthInterceptor
 import com.cloudbridge.spotify.auth.GlobalRateLimitException
 import com.cloudbridge.spotify.auth.TokenManager
@@ -32,6 +32,8 @@ class RetrofitProvider(private val tokenManager: TokenManager) {
 
     companion object {
         private const val CLOUD_RELAY_BASE_URL = "https://aaosspotiftycloudbridge-default-rtdb.firebaseio.com/"
+        private const val CONNECT_TIMEOUT_SECONDS = 10L
+        private const val READ_TIMEOUT_SECONDS = 15L
     }
 
     private val moshi: Moshi = Moshi.Builder()
@@ -41,8 +43,9 @@ class RetrofitProvider(private val tokenManager: TokenManager) {
     // ── Auth Service (no Bearer token needed) ────────────────────────
 
     private val authClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .apply {
             if (BuildConfig.DEBUG) {
                 addInterceptor(HttpLoggingInterceptor().apply {
@@ -69,8 +72,9 @@ class RetrofitProvider(private val tokenManager: TokenManager) {
     // ── API Service (with auth + retry) ──────────────────────────────
 
     private val apiClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .addInterceptor(AuthInterceptor(tokenManager))
         .addInterceptor(RateLimitRetryInterceptor(tokenManager))
         .authenticator(TokenRefreshAuthenticator(tokenManager) { spotifyAuth })
@@ -146,11 +150,11 @@ private class RateLimitRetryInterceptor(
             // immediately so callers can show a user-facing error.
             if (retryAfter > MAX_RETRY_DELAY_SECONDS) {
                 runBlocking { tokenManager.saveRateLimitLockout(retryAfter) }
-                Log.w(TAG, "Rate limited (429). Retry-After ${retryAfter}s exceeds cap — surfacing 429 to caller.")
+                AppLogger.w(TAG, "Rate limited (429). Retry-After ${retryAfter}s exceeds cap — surfacing 429 to caller.")
                 return response
             }
 
-            Log.w(TAG, "Rate limited (429). Retry-After: ${retryAfter}s. Attempt ${retryCount + 1}/$MAX_RETRIES")
+            AppLogger.w(TAG, "Rate limited (429). Retry-After: ${retryAfter}s. Attempt ${retryCount + 1}/$MAX_RETRIES")
             response.close()
 
             try {

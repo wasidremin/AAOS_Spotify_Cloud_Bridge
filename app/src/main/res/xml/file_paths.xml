@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Cache directory: used for the combined log export file -->
+    <cache-path name="cache" path="." />
+    <!-- Internal files directory: used for the raw log files under files/logs/ -->
+    <files-path name="logs" path="logs/" />
+</paths>

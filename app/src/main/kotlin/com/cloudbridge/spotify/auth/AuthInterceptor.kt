@@ -1,5 +1,6 @@
 package com.cloudbridge.spotify.auth
 
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -24,6 +25,10 @@ import okhttp3.Response
  */
 class AuthInterceptor(private val tokenManager: TokenManager) : Interceptor {
 
+    companion object {
+        private const val TAG = "AuthInterceptor"
+    }
+
     /**
      * Intercepts the outgoing HTTP request and attaches a Bearer token.
      *
@@ -41,6 +46,7 @@ class AuthInterceptor(private val tokenManager: TokenManager) : Interceptor {
 
         runBlocking {
             if (tokenManager.isRateLimitLockoutActive()) {
+                AppLogger.w(TAG, "Request blocked by rate limit lockout: ${originalRequest.url.encodedPath}")
                 throw GlobalRateLimitException(
                     lockedUntilEpochMs = tokenManager.getRateLimitUntilEpochMs(),
                     retryAfterSeconds = tokenManager.getRateLimitRetryAfterSeconds()
@@ -57,10 +63,14 @@ class AuthInterceptor(private val tokenManager: TokenManager) : Interceptor {
                 .header("Authorization", "Bearer $accessToken")
                 .build()
         } else {
+            AppLogger.w(TAG, "No token available for ${originalRequest.method} ${originalRequest.url.encodedPath}")
             // No token yet — proceed unauthenticated; the Authenticator will handle 401.
             originalRequest
         }
 
-        return chain.proceed(authenticatedRequest)
+        AppLogger.d(TAG, "→ ${authenticatedRequest.method} ${authenticatedRequest.url.encodedPath}")
+        val response = chain.proceed(authenticatedRequest)
+        AppLogger.d(TAG, "← ${response.code} ${authenticatedRequest.url.encodedPath}")
+        return response
     }
 }

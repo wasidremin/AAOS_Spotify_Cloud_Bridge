@@ -1,7 +1,7 @@
 package com.cloudbridge.spotify.data
 
-import android.util.Log
 import com.cloudbridge.spotify.cache.CacheDatabase
+import com.cloudbridge.spotify.util.AppLogger
 import com.cloudbridge.spotify.cache.CachedAudiobook
 import com.cloudbridge.spotify.cache.CachedAlbum
 import com.cloudbridge.spotify.cache.CachedPlaylist
@@ -53,6 +53,7 @@ class SpotifyLibraryRepository(
             clearPlaylists()
             insertPlaylists(fresh.mapNotNull { playlist -> playlist.toCachedPlaylist() })
         }
+        AppLogger.d(TAG, "Refreshed ${fresh.size} playlists (cached)")
 
         return fresh
     }
@@ -189,7 +190,7 @@ class SpotifyLibraryRepository(
         return try {
             api.getShowEpisodes(showId = showId, limit = 1).items.firstOrNull()?.uri
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch latest episode for show $showId: ${e.message}")
+            AppLogger.w(TAG, "Failed to fetch latest episode for show $showId: ${e.message}")
             null
         }
     }
@@ -202,7 +203,7 @@ class SpotifyLibraryRepository(
                 seedTracks = seedTrackIds.take(5).joinToString(",")
             ).tracks
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to fetch recommendations for seeds ${seedTrackIds.joinToString(",")}: ${e.message}")
+            AppLogger.w(TAG, "Failed to fetch recommendations for seeds ${seedTrackIds.joinToString(",")}: ${e.message}")
             emptyList()
         }
     }
@@ -247,7 +248,7 @@ class SpotifyLibraryRepository(
                 ?.maxByOrNull { candidate -> cleanCandidateScore(track, candidate) }
                 ?.takeIf { cleanCandidateScore(track, it) >= 3 }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to resolve clean replacement for ${track.uri}: ${e.message}")
+            AppLogger.w(TAG, "Failed to resolve clean replacement for ${track.uri}: ${e.message}")
             null
         }
     }

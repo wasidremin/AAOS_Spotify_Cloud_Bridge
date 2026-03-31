@@ -1,7 +1,7 @@
 package com.cloudbridge.spotify.player
 
-import android.util.Log
 import com.cloudbridge.spotify.network.SpotifyApiService
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -58,13 +58,13 @@ class DeviceManager(private val api: SpotifyApiService) {
     suspend fun getPhoneDeviceId(): String? = withContext(Dispatchers.IO) {
         // If user locked a specific device, always use it
         lockedDeviceId?.let {
-            Log.d(TAG, "Using locked device: $it")
+            AppLogger.d(TAG, "Using locked device: $it")
             return@withContext it
         }
 
         mutex.withLock {
             if (cachedDeviceId != null && !isCacheExpired()) {
-                Log.d(TAG, "Returning cached device: $cachedDeviceName ($cachedDeviceId)")
+                AppLogger.d(TAG, "Returning cached device: $cachedDeviceName ($cachedDeviceId)")
                 return@withContext cachedDeviceId
             }
         }
@@ -90,7 +90,7 @@ class DeviceManager(private val api: SpotifyApiService) {
     suspend fun refreshDeviceId(): String? = withContext(Dispatchers.IO) {
         // If the user locked a specific device, completely bypass auto-discovery
         lockedDeviceId?.let {
-            Log.d(TAG, "Refresh bypassed: Using locked device ($it)")
+            AppLogger.d(TAG, "Refresh bypassed: Using locked device ($it)")
             return@withContext it
         }
 
@@ -98,7 +98,7 @@ class DeviceManager(private val api: SpotifyApiService) {
             val response = api.getDevices()
             val devices = response.devices
 
-            Log.d(TAG, "Found ${devices.size} devices: ${devices.map { "${it.name} (${it.type}, active=${it.isActive})" }}")
+            AppLogger.d(TAG, "Found ${devices.size} devices: ${devices.map { "${it.name} (${it.type}, active=${it.isActive})" }}")
 
             // Priority 1: Active smartphone
             val activePhone = devices.find {
@@ -118,13 +118,18 @@ class DeviceManager(private val api: SpotifyApiService) {
                 return@withContext anyPhone.id
             }
 
-            Log.w(TAG, "No suitable Spotify device found.")
-            clearCache()
-            null
+            val anyActiveDevice = devices.find {
+                it.isActive && !it.isRestricted && !it.id.isNullOrBlank()
+            }
+            if (anyActiveDevice != null) {
+                cacheDevice(anyActiveDevice.id!!, anyActiveDevice.name)
+                return@withContext anyActiveDevice.id
+            }
+
+            fallbackToRememberedDevice("No suitable Spotify device found.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch devices: ${e.message}", e)
-            clearCache()
-            null
+            AppLogger.e(TAG, "Failed to fetch devices: ${e.message}", e)
+            fallbackToRememberedDevice("Device discovery failed; preserving remembered target until Spotify reports devices again.")
         }
     }
 
@@ -138,13 +143,24 @@ class DeviceManager(private val api: SpotifyApiService) {
         cacheDevice(id, name.ifBlank { "Active device" })
     }
 
+    private fun fallbackToRememberedDevice(reason: String): String? {
+        val rememberedId = cachedDeviceId
+        if (!rememberedId.isNullOrBlank()) {
+            AppLogger.w(TAG, "$reason Falling back to remembered device: $cachedDeviceName ($rememberedId)")
+            return rememberedId
+        }
+
+        clearCache()
+        return null
+    }
+
     private fun cacheDevice(id: String, name: String) {
         mutex.tryLock() // Best-effort lock for setting cache
         try {
             cachedDeviceId = id
             cachedDeviceName = name
             cacheTimestamp = System.currentTimeMillis()
-            Log.i(TAG, "Cached device: $name ($id)")
+            AppLogger.i(TAG, "Cached device: $name ($id)")
         } finally {
             try { mutex.unlock() } catch (_: IllegalStateException) { }
         }

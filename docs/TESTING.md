@@ -192,6 +192,17 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 8. Tap the collapse chevron
 9. **Expected**: Now Playing slides down, MiniPlayer returns
 
+#### TC-05B: Now Playing Request Budget
+1. Start playback for a normal music track, then open **Now Playing** and leave it open for at least 30 seconds
+2. Watch logcat or a network proxy during the idle period
+3. **Expected**: `GET /v1/me/player` continues at the normal metadata cadence
+4. **Expected**: `GET /v1/me/library/contains` does not fire on every metadata poll while the same track remains active; it should only reappear on track changes or the bounded refresh timer
+
+#### TC-05C: Search Cancellation Stability
+1. Open **Search** and type several characters quickly so each new keystroke cancels the previous request
+2. **Expected**: Results do not flash to an empty state between keystrokes while the newest search is still in flight
+3. **Expected**: The loading indicator follows only the active search and does not flicker off because an older cancelled coroutine ran its cleanup path
+
 #### TC-06: Playback Controls
 1. On Now Playing screen, tap Pause
 2. **Expected**: Playback pauses on phone, button changes to Play
@@ -215,7 +226,8 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 4. **Expected**: Podcast playback prefers the next most recent unplayed episode before falling back to Spotify queue suggestions
 5. Swipe a queued track to the left in the **Spotify Queue** section
 6. **Expected**: Track removed from the local queue display (SwipeToDismiss animation)
-7. **Expected**: Requires a deliberate long horizontal drag (~50% width); diagonal scroll gestures do not dismiss
+7. **Expected**: Rows below the dismissed item keep their identity and do not visibly reset their swipe/compose state when the list compacts
+8. **Expected**: Requires a deliberate long horizontal drag (~50% width); diagonal scroll gestures do not dismiss
 
 #### TC-08B: Queue Screen Podcast Polling Regression
 1. Start podcast playback, then open **Queue**
@@ -229,6 +241,36 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 2. Leave the app open during playback for several minutes, including one period where Spotify briefly stops returning player metadata
 3. **Expected**: The UI continues showing the last known episode/chapter and advances the progress locally instead of immediately dropping to a disconnected/paused state
 4. **Expected**: If Spotify resumes reporting within roughly 2 minutes, the UI re-locks to the authoritative player state without user intervention
+
+#### TC-08D: Liked Songs Load Cap
+1. Open **Library → Playlists → Liked Songs** on an account with a very large saved-track library
+2. **Expected**: The screen renders from a bounded first slice instead of paging the entire library before showing content
+3. **Expected**: Opening Liked Songs does not create a large sequential burst of `GET /v1/me/tracks` calls that risks an immediate 429 lockout
+
+#### TC-08E: Cold-Start Startup Recovery
+1. Force-stop the app, then trigger a launch during a Bluetooth reconnect or while the phone/network is still waking up.
+2. **Expected**: Initial Home, Library, or device discovery may miss on the first pass, but the app retries the startup loaders after a short delay instead of remaining stuck with empty startup data for the entire session.
+3. Bring the app to the foreground again after the phone session is ready.
+4. **Expected**: `MainActivity.onResume()` triggers a bounded startup recheck if Home, Library, or device data is still incomplete.
+
+#### TC-08F: Playback Sync Transport Failure Handling
+1. Start playback, then temporarily block network access or induce a timeout while the metadata sync loop is running.
+2. **Expected**: The app raises the offline/reconnect state and logs a transport failure.
+3. **Expected**: The current playback session is not immediately flattened into a false idle/paused state purely because `GET /v1/me/player` timed out.
+
+#### TC-08G: Warm Cache Startup Stability
+1. Launch the app once with a healthy connection so playlists/albums/shows/audiobooks are cached, then background the app.
+2. Reopen **Home** and **Library** several times within the next minute without changing profiles.
+3. **Expected**: Room-backed content appears immediately and the app does not re-run the full Home/Library startup burst on every navigation.
+4. Put the app into a valid empty-state account condition such as no recent contexts or no active Spotify Connect device.
+5. **Expected**: Startup recovery does not loop forever just because the resulting section is empty.
+
+#### TC-08H: Legacy Placeholder Profile Cleanup
+1. Install a build that still contains the old `legacy_default_profile`, then upgrade to this build.
+2. Launch the app.
+3. **Expected**: The placeholder profile is removed, stale cached library/pins are cleared, and the app lands in **Add Profile** instead of pretending a usable account exists.
+4. Add a real profile.
+5. **Expected**: The new profile starts from clean state without inheriting artwork, pins, or library rows from the removed placeholder account.
 
 #### TC-13: Library Tab Persistence
 1. Navigate to Library and select **Podcasts** (or any non-default tab)
@@ -284,7 +326,24 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 3. Trigger **Play**, **Resume**, **Next**, or another wrapped transport action from the car UI.
 4. **Expected**: The first cloud command may fail, then the app logs that the device is likely asleep.
 5. **Expected**: The app dispatches an AVRCP media-play event, waits briefly, refreshes discovery, and retries the playback command once.
-6. **Expected**: The playback action succeeds when the phone wakes and reconnects.
+6. **Expected**: If `/devices` is temporarily empty, the app keeps using the remembered phone/device target instead of immediately giving up.
+7. **Expected**: If Spotify rejects the stale `device_id` with 404, the app retries once without `device_id` so Spotify can target the active session directly.
+8. **Expected**: The playback action succeeds when the phone wakes and reconnects.
+
+#### TC-12C: Bluetooth Call Routing Safety
+1. Open **Settings** and confirm **Bluetooth Auto-Launch** is in manual mode, or disable it if a MAC address is configured.
+2. Start or receive a phone call through the car while Cloud-Bridge is open.
+3. **Expected**: The app is not treated as a local AAOS media source, so the native Bluetooth call UI and HFP audio route keep control.
+4. During the active call or ringtone window, trigger a playback action that would normally attempt AVRCP wake-up.
+5. **Expected**: Cloud-Bridge skips the AVRCP kickstart while call audio is active instead of injecting a media-play event into the call session.
+
+#### TC-12D: Dead-Zone Playback Command Safety
+1. Start playback on the phone so Spotify has an active session and the app has already memorized the device.
+2. Put the car/emulator into an offline state or induce a transport timeout, then tap **Play**, **Resume**, **Next**, or **Previous** from the car UI.
+3. **Expected**: The command path marks the app offline and does not dispatch the AVRCP Bluetooth wake-up fallback.
+4. **Expected**: The phone does not suddenly start playing unrelated local queue content while the car UI is offline.
+5. Restore connectivity and retry.
+6. **Expected**: Normal cloud playback control resumes without requiring a manual app restart.
 
 #### TC-18: Navigation & MiniPlayer UI Fixes
 1. Start on any screen (Home, Library, Search, etc.)

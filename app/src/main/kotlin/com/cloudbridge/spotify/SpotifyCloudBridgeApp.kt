@@ -4,12 +4,12 @@ import android.app.Application
 import android.os.Build
 import com.cloudbridge.spotify.auth.TokenManager
 import com.cloudbridge.spotify.cache.CacheDatabase
-import com.cloudbridge.spotify.cache.UserProfile
 import com.cloudbridge.spotify.data.SpotifyLibraryRepository
 import com.cloudbridge.spotify.domain.CustomMixEngine
 import com.cloudbridge.spotify.network.RetrofitProvider
 import com.cloudbridge.spotify.player.DeviceManager
 import com.cloudbridge.spotify.player.SpotifyPlaybackController
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
@@ -37,10 +37,8 @@ import kotlinx.coroutines.runBlocking
 class SpotifyCloudBridgeApp : Application() {
 
     companion object {
+        private const val TAG = "CloudBridgeApp"
         private const val LEGACY_PROFILE_ID = "legacy_default_profile"
-        private const val LEGACY_CLIENT_ID = "1a979df868544bcd8c69fd27492c0cb0"
-        private const val LEGACY_CLIENT_SECRET = "78731cc4af5c42e7a2609f1419655490"
-        private const val LEGACY_REFRESH_TOKEN = "AQA7TLxxhyfiYlq_5DJfWjZ2X7evsTvQbWnhuQkL6F76JeBlcj9QdndEvVlbmks6ASNpTMHuVTBEBOH1TzQO4UcFRPVo8WjmMY3qDkYvq5xEDdKK6hKFikMkY2LxkEbcG1E"
     }
 
     /** Application-level coroutine scope for long-running background work. */
@@ -70,25 +68,38 @@ class SpotifyCloudBridgeApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        AppLogger.init(this)
+
         cacheDatabase = CacheDatabase.getInstance(this)
 
         tokenManager = TokenManager(
             context = this,
             userProfileDao = cacheDatabase.userProfileDao()
         )
+
+        // Restore logging preference from DataStore
         if (!Build.FINGERPRINT.contains("robolectric", ignoreCase = true)) {
             runBlocking {
-                tokenManager.migrateLegacyCredentialsIfNeeded()
+                val loggingWasEnabled = tokenManager.getLoggingEnabled()
+                AppLogger.setEnabled(loggingWasEnabled)
             }
         }
 
-        if (!isUnitTestEnvironment()) {
+        AppLogger.i(TAG, "SpotifyCloudBridgeApp starting")
+
+        if (!Build.FINGERPRINT.contains("robolectric", ignoreCase = true)) {
             runBlocking {
-                seedLegacyProfileIfNeeded()
+                tokenManager.migrateLegacyCredentialsIfNeeded()
+                if (tokenManager.removeProfile(LEGACY_PROFILE_ID)) {
+                    cacheDatabase.libraryCacheDao().clearAll()
+                    cacheDatabase.pinnedItemDao().clearAll()
+                    AppLogger.w(TAG, "Removed seeded legacy profile placeholder and cleared stale profile cache")
+                }
             }
         }
 
         retrofitProvider = RetrofitProvider(tokenManager)
+        AppLogger.d(TAG, "RetrofitProvider initialized")
 
         deviceManager = DeviceManager(retrofitProvider.spotifyApi)
 
@@ -102,31 +113,6 @@ class SpotifyCloudBridgeApp : Application() {
             cacheDb = cacheDatabase
         )
         customMixEngine = CustomMixEngine(libraryRepository)
-    }
-
-    private suspend fun seedLegacyProfileIfNeeded() {
-        val userProfileDao = cacheDatabase.userProfileDao()
-        if (userProfileDao.getAllOnce().isNotEmpty()) return
-
-        userProfileDao.insert(
-            UserProfile(
-                id = LEGACY_PROFILE_ID,
-                name = "Primary Profile",
-                clientId = LEGACY_CLIENT_ID,
-                clientSecret = LEGACY_CLIENT_SECRET,
-                refreshToken = LEGACY_REFRESH_TOKEN,
-                accessToken = null,
-                tokenExpiryEpochMs = 0L,
-                profileImageUrl = null
-            )
-        )
-        tokenManager.setActiveProfileId(LEGACY_PROFILE_ID)
-    }
-
-    private fun isUnitTestEnvironment(): Boolean = try {
-        Class.forName("org.robolectric.RuntimeEnvironment")
-        true
-    } catch (_: ClassNotFoundException) {
-        false
+        AppLogger.i(TAG, "All singletons initialized")
     }
 }

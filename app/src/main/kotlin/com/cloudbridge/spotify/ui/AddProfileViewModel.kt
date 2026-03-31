@@ -8,6 +8,7 @@ import com.cloudbridge.spotify.auth.TokenManager
 import com.cloudbridge.spotify.cache.UserProfile
 import com.cloudbridge.spotify.cache.UserProfileDao
 import com.cloudbridge.spotify.network.CloudRelayService
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -25,6 +26,7 @@ class AddProfileViewModel(
 ) : ViewModel() {
 
     companion object {
+        private const val TAG = "AddProfileVM"
         private const val POLL_INTERVAL_MS = 3000L
         private const val WEB_APP_BASE_URL = "https://wasidremin.github.io/AAOS_Spotify_Cloud_Bridge/"
         private val SESSION_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".toCharArray()
@@ -71,6 +73,7 @@ class AddProfileViewModel(
     fun startNewSession(refreshProfileId: String? = null) {
         pollingJob?.cancel()
         val code = buildSessionCode()
+        AppLogger.i(TAG, "Starting new QR session: $code (refresh=${!refreshProfileId.isNullOrBlank()})")
         _sessionCode.value = code
         _qrCodeUrl.value = ""
         _isWaitingForProfile.value = true
@@ -122,12 +125,14 @@ class AddProfileViewModel(
                         userProfileDao.insert(profile)
                         tokenManager.setActiveProfileId(profile.id)
                         cloudRelayService.deleteSession(code)
+                        AppLogger.i(TAG, "Profile added/refreshed: ${profile.name} (${profile.id})")
                         _isCompleted.value = true
                         _isWaitingForProfile.value = false
                         _isCompleting.value = false
                         break
                     }
                 } catch (e: Exception) {
+                    AppLogger.w(TAG, "Profile polling error: ${e.message}")
                     _errorMessage.value = e.message ?: "Profile polling failed"
                 }
 

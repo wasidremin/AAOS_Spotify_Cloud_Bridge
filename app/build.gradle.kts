@@ -13,8 +13,8 @@ android {
         applicationId = "com.cloudbridge.spotify"
         minSdk = 30
         targetSdk = 35
-        versionCode = 16
-        versionName = "2.8.1"
+        versionCode = 18
+        versionName = "2.8.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

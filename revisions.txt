@@ -1,4 +1,247 @@
 ═══════════════════════════════════════════════════════════════
+ R5.27  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Release build v2.8.3 — published the logging and startup/cache hardening set and generated the signed AAB
+
+ Changes:
+   • Published the accumulated R5.21-R5.26 changes to GitHub as the next release-ready snapshot on `main`
+   • Revalidated the workspace with the known-good JDK 17 Gradle path after the VS Code task wrappers again failed on Java path quoting
+   • Generated the signed release Android App Bundle for version `2.8.3` / `versionCode 18`
+
+ Files Modified:
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.26  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Removed the seeded legacy profile and restored warm-cache startup behavior
+
+ Changes:
+   • Stopped seeding the hard-coded `legacy_default_profile` at app startup and now purge that placeholder row on launch if it still exists from older installs
+   • Clear profile-scoped Room cache and pins when the placeholder profile is removed or when the app falls back into Add Profile mode, preventing stale library data from leaking into the next real profile
+   • Reworked startup bootstrap completeness to track successful loader settlement instead of non-empty lists so valid empty states no longer trigger endless recovery retries
+   • Added short Home and Library freshness windows so revisiting those screens keeps warm cached data instead of immediately reissuing the full loader burst
+   • Updated architecture and testing docs with warm-cache and legacy-profile regression coverage
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/SpotifyCloudBridgeApp.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: SMOKE TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.25  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Prevented offline playback taps from triggering AVRCP wake-up and tuned OkHttp for mobile networks
+
+ Changes:
+   • Updated `SpotifyPlaybackController.executeWithRetry()` to rethrow transport-level `IOException` failures instead of collapsing them into `false`
+   • Reworked `SpotifyViewModel.attemptPlaybackCommandWithWakeup()` to distinguish semantic playback failures from real network drops so dead-zone taps set offline state without firing AVRCP media-play
+   • Applied the new playback-command outcome handling across play/resume/skip/context-start paths and queue enqueue flows so device-not-found UI is no longer shown for network outages
+   • Reduced OkHttp connect timeout from 15s to 10s and enabled `retryOnConnectionFailure(true)` on both Retrofit clients while preserving the 15s read timeout
+   • Updated architecture, SDS, and testing docs with the new offline control policy and a dead-zone regression scenario
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/SpotifyPlaybackController.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/RetrofitProvider.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • docs/ARCHITECTURE.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.24  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Hardened cold-start recovery and preserved playback-sync transport failures
+
+ Changes:
+   • Added bounded startup recovery retries in `SpotifyViewModel` so Home, Library, and device discovery can recover after AAOS launches the app before Bluetooth, Spotify Connect, or network readiness has settled
+   • Added an on-resume startup recheck from `MainActivity` so incomplete cold-start data can be retried when the app returns to the foreground later in the drive
+   • Updated `SpotifyPlaybackController.getCurrentPlayback()` to rethrow transport-level failures (`UnknownHostException`, `SocketTimeoutException`, and other I/O errors) instead of flattening them into `null`
+   • Updated metadata-sync handling so transport errors stay distinct from Spotify's real `204 No Content` idle response
+   • Documented the startup recovery and playback-state error policies and added targeted regression scenarios to the test guide
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/SpotifyPlaybackController.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.23  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Switched log export from AAOS-incompatible share sheet to document picker save flow
+
+ Changes:
+   • Investigated the emulator with adb logcat and package-manager intent resolution after the new log export showed an empty chooser
+   • Confirmed the AAOS image has no `ACTION_SEND` handlers for `text/plain`, so the chooser had no targets even though it launched successfully
+   • Confirmed `com.android.car.documentsui` resolves `ACTION_CREATE_DOCUMENT`, making save-as the correct AAOS export path
+   • Updated `SettingsScreen` so Export now launches the document picker and writes the combined log file to the user-selected URI
+   • Kept the FileProvider-based share flow only as a fallback for environments that lack a document picker, and added `ClipData` so chooser preview permission is granted correctly
+   • Added `SpotifyViewModel.writeExportedLogsToUri()` to copy the generated export file into the selected destination
+   • Updated the setup guide and SDS to describe the document-picker-first export behavior
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SettingsScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • docs/SETUP_GUIDE.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: DIAGNOSED VIA ADB LOGCAT
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.22  —  2026-03-31
+═══════════════════════════════════════════════════════════════
+ Summary: Comprehensive in-app logging system with toggle, file export, and USB share
+
+ Changes:
+   • Created AppLogger utility (util/AppLogger.kt) — centralised file logger with buffered writes, 5 MB rotation, and thread-safe ConcurrentLinkedQueue
+   • Added logging enable/disable preference to TokenManager (DataStore key: logging_enabled)
+   • Added Logging section to Settings screen: toggle switch, log size display, Export button (share intent via FileProvider), and Clear button
+   • Replaced all android.util.Log calls across 7 source files with AppLogger calls so logs are captured to file when enabled
+   • Added request/response logging to AuthInterceptor (HTTP method, endpoint path, status code)
+   • Added logging to SpotifyCloudBridgeApp.onCreate for initialization tracking
+   • Added logging to TokenManager for token saves, rate limit lockouts, and lockout clears
+   • Added logging to AddProfileViewModel for QR onboarding sessions and profile completion
+   • Added logging to CustomMixEngine for mix building events
+   • Added logging to SetupActivity for credential save/clear actions
+   • Added navigation logging to SpotifyViewModel.navigateTo
+   • Added playback state logging to SpotifyViewModel.togglePlayPause
+   • Added profile switch logging to SpotifyViewModel.switchActiveProfile
+   • Registered FileProvider in AndroidManifest.xml for log export via share intent
+   • Created res/xml/file_paths.xml for FileProvider cache and files paths
+   • Updated SETUP_GUIDE.md with Section 10 (In-App Logging) covering enable, export, log format, and privacy
+   • Updated SOFTWARE_DESIGN_SPECIFICATION.md with Logging row in Settings screen table, AppLogger in file tree and package descriptions
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/util/AppLogger.kt (NEW)
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/AuthInterceptor.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenRefreshAuthenticator.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/SetupActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/network/RetrofitProvider.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/DeviceManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/SpotifyPlaybackController.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/data/SpotifyLibraryRepository.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/domain/CustomMixEngine.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/receiver/BluetoothAutoLaunchReceiver.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/AddProfileViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SettingsScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/SpotifyCloudBridgeApp.kt
+   • app/src/main/AndroidManifest.xml
+   • app/src/main/res/xml/file_paths.xml (NEW)
+   • docs/SETUP_GUIDE.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.21  —  2026-03-28
+═══════════════════════════════════════════════════════════════
+ Summary: Fixed cancellation flicker, capped Liked Songs loading, stabilized queue keys, and removed local-media manifest flags
+
+ Changes:
+   • Reworked `SpotifyViewModel` loader catch/finally paths so `CancellationException` propagates and cancelled search/detail requests no longer clear UI state or flicker loading indicators
+   • Capped the Liked Songs detail loader to a bounded first slice instead of paging the user's full saved-track history, reducing 429 risk on large libraries
+   • Wrapped Spotify queue entries in stable local `QueueItem` identities so Queue swipe-to-dismiss no longer keys rows by list index and duplicate tracks keep stable Compose state
+   • Removed `android:appCategory="audio"` and the media foreground-service permissions from the manifest, added a Settings control to disable Bluetooth auto-launch, and suppressed AVRCP kickstart while call/ringtone audio is active
+   • Updated README, architecture, testing, and SDS docs to describe the new loader, queue, and AAOS audio-routing behavior
+
+ Files Modified:
+   • README.md
+   • SOFTWARE_DESIGN_SPECIFICATION.md
+   • app/src/main/AndroidManifest.xml
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/QueueScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SettingsScreen.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.20  —  2026-03-27
+═══════════════════════════════════════════════════════════════
+ Summary: Release build v2.8.2 — validated the reconnect fixes on emulator and generated the next signed AAB
+
+ Changes:
+   • Bumped `versionCode` to 17 and `versionName` to `2.8.2` so the next publishable release artifact is uniquely installable
+   • Validated the current R5.19 rate-limit and device-reconnect fixes on the AAOS emulator with a fresh install, launch, screenshot capture, and startup log review
+   • Generated the signed release bundle for the current Cloud-Bridge snapshot
+
+ Files Modified:
+   • app/build.gradle.kts
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.19  —  2026-03-26
+═══════════════════════════════════════════════════════════════
+ Summary: Reduced Now Playing rate-limit pressure and hardened device fallback during phone sleep
+
+ Changes:
+   • Stopped forcing saved-track status refreshes on every Now Playing metadata poll, so the heart-state check now follows the normal bounded timer instead of hammering `GET /v1/me/library/contains`
+   • Updated `DeviceManager` to fall back to any active unrestricted Connect device and to preserve the remembered phone/device target across transient `/devices` blind spots instead of clearing it immediately
+   • Updated `SpotifyPlaybackController` so 404 "device not found" failures can retry once without `device_id`, letting Spotify route the command to the active session when a cached ID goes stale
+   • Added `DeviceManager` regression coverage for remembered-device fallback and updated runtime/testing docs to describe the lower request volume and stronger reconnect path
+
+ Files Modified:
+   • README.md
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/DeviceManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/SpotifyPlaybackController.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/player/DeviceManagerTest.kt
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: VERIFIED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.18  —  2026-03-23
 ═══════════════════════════════════════════════════════════════
  Summary: Release build v2.8.1 — bumped version metadata and generated the next signed AAB

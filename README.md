@@ -134,6 +134,7 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Heart/save state now uses Spotify's generic library endpoints (`PUT/DELETE/GET /v1/me/library*`) instead of the removed track-specific save/check endpoints.
 - Settings now shows all stored Spotify profiles and provides an **Add profile with QR code** entry point.
 - Settings now also includes a **Refresh Permissions** action that reuses the active profile's saved developer app credentials, launches a lighter Spotify re-consent flow on the phone, and updates that same Room profile row in place when the new refresh token comes back.
+- Settings now also exposes **Bluetooth Auto-Launch** manual mode so you can disable ACL-triggered foregrounding during AAOS Bluetooth and call-routing diagnostics.
 - Settings now includes a **Home screen order** editor so users can rearrange sections like Jump Back In, Podcasts, and New Releases.
 - The left navigation rail now keeps **Settings** anchored at the bottom while **Now Playing** sits above it with the rest of the primary destinations.
 - The app now follows the car's day/night mode by switching between two dark palettes and applying a heavier Now Playing scrim at night to reduce glare.
@@ -155,7 +156,10 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Metadata sync now tracks offline conditions (`UnknownHostException`, `SocketTimeoutException`) and exposes `isOffline` in `SpotifyViewModel`.
 - Spotify 429 penalties now trigger a global lockout persisted in `TokenManager`, surfaced through a top warning banner, and enforced by the API auth/interceptor stack so the app stops issuing outbound Spotify API requests until the lockout expires.
 - `TokenManager` now resolves auth from the active Room-backed profile before interceptors and token refresh paths read credentials.
+- The manifest no longer classifies Cloud-Bridge as an `audio` app or requests media foreground-service permissions, keeping the UI positioned as a remote-control surface instead of a local AAOS media source.
 - Playback metadata now passively memorizes the last active Spotify device ID, and failed transport commands can dispatch an AVRCP Bluetooth media-play kickstart through Android `AudioManager` before retrying discovery once.
+- AVRCP kickstart is now skipped while call, ringtone, or communication audio modes are active so Bluetooth HFP call routing stays under the native stack.
+- Device discovery now falls back to any active unrestricted Connect target and preserves the remembered phone/device ID across short `/devices` blind spots, reducing the need to wake the phone manually when Spotify temporarily stops advertising it.
 - Queue's podcast-aware **Up Next** synthesis now caches the active show's episode slice for the current playback session, preventing repeated `GET /v1/shows/{id}/episodes` calls every metadata poll while the Queue screen stays open.
 - The app displays an in-app top red banner: **"Offline Mode - Reconnecting..."** when connectivity drops.
 - The app also surfaces Spotify auth/scope failures (HTTP 401/403) with a top banner and direct **Open** action into Setup.
@@ -164,7 +168,8 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 
 - The heaviest request paths were audited before the lockout change.
 - `syncPlaybackState()` no longer leaves podcast playback stale after transient null responses; spoken-word sessions retry once immediately, poll more frequently, and tolerate short background gaps before declaring playback out of sync.
-- Saved-track status is now force-refreshed when Now Playing opens and periodically while the same track remains active so the heart stays aligned with Liked Songs.
+- Saved-track status is refreshed when a track changes and then rechecked on a bounded timer, so leaving Now Playing open no longer forces `GET /v1/me/library/contains` on every metadata poll.
+- Opening Liked Songs now loads a bounded first slice instead of paging the user's entire saved-track library, which avoids large burst traffic on big accounts.
 - Home suggested-playlist loading previously forced a full playlist refresh even when playlists were already cached in memory; it now reuses loaded or cached playlists first.
 - Recently played hydration now uses loaded/cached playlist and album metadata before falling back to per-item hydration requests.
 - Podcast freshness checks remain a bounded hotspot because they intentionally inspect recent episodes per saved show, but concurrency is capped and the work is limited to a small per-show episode window.

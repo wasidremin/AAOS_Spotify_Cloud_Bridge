@@ -1,7 +1,7 @@
 package com.cloudbridge.spotify.auth
 
-import android.util.Log
 import com.cloudbridge.spotify.network.SpotifyAuthService
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -49,7 +49,7 @@ class TokenRefreshAuthenticator(
         // Prevent infinite retry loops — give up after 1 attempt.
         // responseCount() walks the prior-response chain to count retries.
         if (responseCount(response) >= 2) {
-            Log.w(TAG, "Token refresh failed after retry. Giving up.")
+            AppLogger.w(TAG, "Token refresh failed after retry. Giving up.")
             return null
         }
 
@@ -64,7 +64,7 @@ class TokenRefreshAuthenticator(
                 // the token while we were blocked on the mutex.
                 if (tokenManager.isAccessTokenValid()) {
                     val freshToken = tokenManager.getAccessToken()
-                    Log.d(TAG, "Token already refreshed by another thread.")
+                    AppLogger.d(TAG, "Token already refreshed by another thread.")
                     return@runBlocking response.request.newBuilder()
                         .header("Authorization", "Bearer $freshToken")
                         .build()
@@ -76,7 +76,7 @@ class TokenRefreshAuthenticator(
                 val refreshToken = tokenManager.getRefreshToken()
 
                 if (clientId.isNullOrBlank() || refreshToken.isNullOrBlank()) {
-                    Log.e(TAG, "No credentials stored. Cannot refresh token.")
+                    AppLogger.e(TAG, "No credentials stored. Cannot refresh token.")
                     return@runBlocking null
                 }
 
@@ -101,14 +101,14 @@ class TokenRefreshAuthenticator(
                         expiresInSeconds = tokenResponse.expiresIn
                     )
 
-                    Log.i(TAG, "Token refreshed successfully. Expires in ${tokenResponse.expiresIn}s")
+                    AppLogger.i(TAG, "Token refreshed successfully. Expires in ${tokenResponse.expiresIn}s")
 
                     // Retry the original request with the new Bearer token.
                     response.request.newBuilder()
                         .header("Authorization", "Bearer ${tokenResponse.accessToken}")
                         .build()
                 } catch (e: Exception) {
-                    Log.e(TAG, "Token refresh failed: ${e.message}", e)
+                    AppLogger.e(TAG, "Token refresh failed: ${e.message}", e)
                     null // Returning null tells OkHttp to stop retrying.
                 }
             }

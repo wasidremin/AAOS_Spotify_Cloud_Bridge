@@ -1,6 +1,11 @@
 package com.cloudbridge.spotify.ui.screens
 
+import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,6 +22,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +52,7 @@ fun SettingsScreen(
     val devices by viewModel.deviceList.collectAsState()
     val lockedId by viewModel.lockedDeviceId.collectAsState()
     val lockedName by viewModel.lockedDeviceName.collectAsState()
+    val btAutoLaunchMac by viewModel.btAutoLaunchMac.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val rightPadding by viewModel.rightPadding.collectAsState()
     val playInstantly by viewModel.playInstantly.collectAsState()
@@ -55,6 +62,26 @@ fun SettingsScreen(
         profiles.firstOrNull { it.id == activeProfileId } ?: profiles.firstOrNull()
     }
     val context = LocalContext.current
+    var pendingExportFilePath by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val createDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { destinationUri: Uri? ->
+        val sourcePath = pendingExportFilePath
+        pendingExportFilePath = null
+
+        if (destinationUri == null || sourcePath.isNullOrBlank()) {
+            return@rememberLauncherForActivityResult
+        }
+
+        viewModel.writeExportedLogsToUri(java.io.File(sourcePath), destinationUri) { success ->
+            Toast.makeText(
+                context,
+                if (success) "Logs exported" else "Failed to export logs",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
 
     // Refresh devices on entry
     LaunchedEffect(Unit) { viewModel.loadDevices() }
@@ -190,6 +217,40 @@ fun SettingsScreen(
                 }
             }
 
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SpotifyDarkGray)
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Bluetooth Auto-Launch",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = SpotifyWhite
+                        )
+                        Text(
+                            btAutoLaunchMac?.let { "Enabled for $it" }
+                                ?: "Manual mode keeps Cloud-Bridge from foregrounding itself during Bluetooth reconnects.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SpotifyLightGray
+                        )
+                    }
+                    TextButton(
+                        enabled = !btAutoLaunchMac.isNullOrBlank(),
+                        onClick = { viewModel.disableBluetoothAutoLaunch() }
+                    ) {
+                        Text(
+                            text = if (btAutoLaunchMac.isNullOrBlank()) "Manual" else "Disable",
+                            color = if (btAutoLaunchMac.isNullOrBlank()) SpotifyLightGray else SpotifyGreen
+                        )
+                    }
+                }
+            }
+
             // ── Section: Layout Customization ────────────────────────
             item {
                 Spacer(Modifier.height(16.dp))
@@ -297,6 +358,100 @@ fun SettingsScreen(
                         onCheckedChange = { viewModel.updatePlayInstantly(it) },
                         colors = SwitchDefaults.colors(checkedThumbColor = SpotifyWhite, checkedTrackColor = SpotifyGreen)
                     )
+                }
+            }
+
+            // ── Section: Logging ──────────────────────────────────────
+            item {
+                Spacer(Modifier.height(16.dp))
+                SectionHeader("Logging")
+            }
+
+            item {
+                val loggingEnabled by viewModel.loggingEnabled.collectAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Enable Logging", color = SpotifyWhite, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Writes API calls, auth events, playback commands, and errors to an internal log file.",
+                            color = SpotifyLightGray,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = loggingEnabled,
+                        onCheckedChange = { viewModel.updateLoggingEnabled(it) },
+                        colors = SwitchDefaults.colors(checkedThumbColor = SpotifyWhite, checkedTrackColor = SpotifyGreen)
+                    )
+                }
+            }
+
+            item {
+                val loggingEnabled by viewModel.loggingEnabled.collectAsState()
+                val logSizeText = remember(loggingEnabled) {
+                    val bytes = com.cloudbridge.spotify.util.AppLogger.totalLogSizeBytes()
+                    when {
+                        bytes < 1024 -> "$bytes B"
+                        bytes < 1024 * 1024 -> "${bytes / 1024} KB"
+                        else -> "${"%.1f".format(bytes / (1024.0 * 1024.0))} MB"
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SpotifyDarkGray)
+                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Log Size", style = MaterialTheme.typography.bodyLarge, color = SpotifyWhite)
+                        Text(logSizeText, style = MaterialTheme.typography.bodySmall, color = SpotifyLightGray)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            viewModel.exportLogs { file ->
+                                if (file != null) {
+                                    val createDocumentIntent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                                        addCategory(Intent.CATEGORY_OPENABLE)
+                                        type = "text/plain"
+                                    }
+                                    val hasDocumentTarget = createDocumentIntent.resolveActivity(context.packageManager) != null
+
+                                    if (hasDocumentTarget) {
+                                        pendingExportFilePath = file.absolutePath
+                                        createDocumentLauncher.launch(file.name)
+                                    } else {
+                                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                                            context,
+                                            "${context.packageName}.fileprovider",
+                                            file
+                                        )
+                                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            clipData = ClipData.newRawUri("cloudbridge_logs", uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(shareIntent, "Export Logs"))
+                                    }
+                                } else {
+                                    Toast.makeText(context, "No logs available to export", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }) {
+                            Text("Export", color = SpotifyGreen)
+                        }
+                        TextButton(onClick = { viewModel.clearLogs() }) {
+                            Text("Clear", color = SpotifyLightGray)
+                        }
+                    }
                 }
             }
 

@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.cloudbridge.spotify.cache.UserProfile
 import com.cloudbridge.spotify.cache.UserProfileDao
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -42,6 +43,7 @@ class TokenManager(
         get() = testDataStore ?: context.dataStore
 
     companion object {
+        private const val TAG = "TokenManager"
         private val KEY_ACTIVE_PROFILE_ID = stringPreferencesKey("active_profile_id")
         private val KEY_LEGACY_CLIENT_ID = stringPreferencesKey("client_id")
         private val KEY_LEGACY_CLIENT_SECRET = stringPreferencesKey("client_secret")
@@ -59,6 +61,7 @@ class TokenManager(
         private val KEY_EXPLICIT_FILTER_ENABLED = androidx.datastore.preferences.core.booleanPreferencesKey("explicit_filter_enabled")
         private val KEY_DAILY_DRIVE_NEWS_ID = stringPreferencesKey("daily_drive_news_id")
         private val KEY_HOME_SECTION_ORDER = stringPreferencesKey("home_section_order")
+        private val KEY_LOGGING_ENABLED = androidx.datastore.preferences.core.booleanPreferencesKey("logging_enabled")
         private const val DEFAULT_DAILY_DRIVE_NEWS_ID = "1L1qK1Gvj5B0AItWlF1n9G"
     }
 
@@ -108,6 +111,8 @@ class TokenManager(
         !profile?.clientId.isNullOrBlank() && !profile?.refreshToken.isNullOrBlank()
     }
 
+    val loggingEnabledFlow: Flow<Boolean> = dataStore.data.map { it[KEY_LOGGING_ENABLED] ?: false }
+
     // ── Suspend getters (for one-shot reads in interceptors) ─────────
 
     suspend fun getClientId(): String? = resolveActiveProfile()?.clientId
@@ -118,6 +123,7 @@ class TokenManager(
     suspend fun getActiveProfileId(): String? = activeProfileIdFlow.first()
     suspend fun getRateLimitUntilEpochMs(): Long = dataStore.data.first()[KEY_RATE_LIMIT_UNTIL] ?: 0L
     suspend fun getRateLimitRetryAfterSeconds(): Long = dataStore.data.first()[KEY_RATE_LIMIT_RETRY_AFTER_SECONDS] ?: 0L
+    suspend fun getLoggingEnabled(): Boolean = dataStore.data.first()[KEY_LOGGING_ENABLED] ?: false
 
     /**
      * Returns `true` if the stored access token is still valid.
@@ -182,6 +188,7 @@ class TokenManager(
      */
     suspend fun saveAccessToken(accessToken: String, expiresInSeconds: Int) {
         val activeProfile = resolveActiveProfile() ?: return
+        AppLogger.d(TAG, "Saving new access token (expires in ${expiresInSeconds}s)")
         userProfileDao.update(
             activeProfile.copy(
                 accessToken = accessToken,
@@ -198,6 +205,7 @@ class TokenManager(
 
     suspend fun saveRateLimitLockout(retryAfterSeconds: Long) {
         val boundedRetryAfter = retryAfterSeconds.coerceAtLeast(1L)
+        AppLogger.w(TAG, "Rate limit lockout activated for ${boundedRetryAfter}s")
         dataStore.edit { prefs ->
             prefs[KEY_RATE_LIMIT_UNTIL] = System.currentTimeMillis() + (boundedRetryAfter * 1000L)
             prefs[KEY_RATE_LIMIT_RETRY_AFTER_SECONDS] = boundedRetryAfter
@@ -205,6 +213,7 @@ class TokenManager(
     }
 
     suspend fun clearRateLimitLockout() {
+        AppLogger.i(TAG, "Rate limit lockout cleared")
         dataStore.edit { prefs ->
             prefs.remove(KEY_RATE_LIMIT_UNTIL)
             prefs.remove(KEY_RATE_LIMIT_RETRY_AFTER_SECONDS)
@@ -217,6 +226,25 @@ class TokenManager(
     suspend fun clearAll() {
         dataStore.edit { it.clear() }
         userProfileDao.clearAll()
+    }
+
+    suspend fun removeProfile(profileId: String): Boolean {
+        val profile = userProfileDao.getById(profileId) ?: return false
+        userProfileDao.delete(profile)
+
+        val fallbackProfile = userProfileDao.getAllOnce().firstOrNull()
+        dataStore.edit { prefs ->
+            if (prefs[KEY_ACTIVE_PROFILE_ID] == profileId) {
+                if (fallbackProfile == null) {
+                    prefs.remove(KEY_ACTIVE_PROFILE_ID)
+                } else {
+                    prefs[KEY_ACTIVE_PROFILE_ID] = fallbackProfile.id
+                }
+            }
+        }
+
+        AppLogger.i(TAG, "Removed profile: ${profile.name} ($profileId)")
+        return true
     }
 
     suspend fun migrateLegacyCredentialsIfNeeded(): Boolean {
@@ -328,6 +356,10 @@ class TokenManager(
     }
 
     suspend fun getBtAutoLaunchMac(): String? = btAutoLaunchMacFlow.first()
+
+    suspend fun saveLoggingEnabled(enabled: Boolean) {
+        dataStore.edit { it[KEY_LOGGING_ENABLED] = enabled }
+    }
 
     private suspend fun resolveActiveProfile(): UserProfile? {
         val activeId = getActiveProfileId()

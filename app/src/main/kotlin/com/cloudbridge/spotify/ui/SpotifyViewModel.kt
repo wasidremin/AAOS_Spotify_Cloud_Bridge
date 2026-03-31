@@ -1,8 +1,9 @@
 package com.cloudbridge.spotify.ui
 
 import android.media.AudioManager
-import android.util.Log
+import android.net.Uri
 import android.view.KeyEvent
+import com.cloudbridge.spotify.util.AppLogger
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -31,8 +32,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
@@ -85,6 +89,11 @@ data class SearchResultItem(
     val type: String
 )
 
+data class QueueItem(
+    val uniqueId: String = java.util.UUID.randomUUID().toString(),
+    val track: SpotifyPlayableItem
+)
+
 data class CustomMix(
     val id: String,
     val title: String,
@@ -115,6 +124,12 @@ data class PodcastUpdateInfo(
         !baseSubtitle.isNullOrBlank() -> "$newEpisodeCount new episodes · $baseSubtitle"
         else -> "$newEpisodeCount new episodes"
     }
+}
+
+private enum class PlaybackCommandOutcome {
+    Success,
+    Failed,
+    NetworkFailure
 }
 
 /**
@@ -165,9 +180,15 @@ class SpotifyViewModel(
         private const val PODCAST_METADATA_POLL_MS = 2000L
         private const val PODCAST_NULL_TOLERANCE_MS = 120_000L
         private const val PODCAST_RETRY_DELAY_MS = 750L
+        private const val STARTUP_RECOVERY_RETRY_DELAY_MS = 6000L
+        private const val STARTUP_RECOVERY_MAX_ATTEMPTS = 2
+        private const val STARTUP_RESUME_RECHECK_MIN_INTERVAL_MS = 15_000L
+        private const val HOME_REFRESH_COOLDOWN_MS = 60_000L
+        private const val LIBRARY_REFRESH_COOLDOWN_MS = 90_000L
         private const val QUEUE_VISIBLE_REFRESH_MS = 15_000L
         private const val BLUETOOTH_KICKSTART_DELAY_MS = 2000L
         private const val SAVED_STATUS_REFRESH_MS = 15_000L
+        private const val MAX_LIKED_SONGS_DETAIL_LOAD = 500
         private const val MAX_QUEUE_BATCH = 100
         private const val MAX_UP_NEXT_ITEMS = 20
         private const val ENHANCED_PLAYLIST_GROUP_SIZE = 5
@@ -320,8 +341,8 @@ class SpotifyViewModel(
     private val _upNext = MutableStateFlow<List<SpotifyPlayableItem>>(emptyList())
     val upNext: StateFlow<List<SpotifyPlayableItem>> = _upNext
 
-    private val _queue = MutableStateFlow<List<SpotifyPlayableItem>>(emptyList())
-    val queue: StateFlow<List<SpotifyPlayableItem>> = _queue
+    private val _queue = MutableStateFlow<List<QueueItem>>(emptyList())
+    val queue: StateFlow<List<QueueItem>> = _queue
 
     private var lastPlaybackContextTracks: List<SpotifyTrack> = emptyList()
     private var lastPlaybackContextEpisodes: List<SpotifyEpisode> = emptyList()
@@ -355,6 +376,9 @@ class SpotifyViewModel(
     private val _lockedDeviceName = MutableStateFlow<String?>(null)
     val lockedDeviceName: StateFlow<String?> = _lockedDeviceName.asStateFlow()
 
+    val btAutoLaunchMac: StateFlow<String?> = tokenManager.btAutoLaunchMacFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     // ── Layout Configuration ─────────────────────────────────────────
 
     private val _gridColumns = MutableStateFlow(4)
@@ -378,6 +402,9 @@ class SpotifyViewModel(
 
     private val _explicitFilterEnabled = MutableStateFlow(false)
     val explicitFilterEnabled: StateFlow<Boolean> = _explicitFilterEnabled.asStateFlow()
+
+    private val _loggingEnabled = MutableStateFlow(false)
+    val loggingEnabled: StateFlow<Boolean> = _loggingEnabled.asStateFlow()
 
     private val _dailyDriveNewsId = MutableStateFlow("")
     val dailyDriveNewsId: StateFlow<String> = _dailyDriveNewsId.asStateFlow()
@@ -415,9 +442,25 @@ class SpotifyViewModel(
     // ── Metadata Sync ────────────────────────────────────────────────
 
     private var metadataSyncJob: Job? = null
+    private var startupRecoveryJob: Job? = null
     private var searchJob: Job? = null
     private var podcastUpdatesJob: Job? = null
     private var lastObservedProfileId: String? = null
+    private var lastStartupRecoveryAttemptAtMs: Long = 0L
+    private var lastHomeLoadCompletedAtMs: Long = 0L
+    private var lastLibraryLoadCompletedAtMs: Long = 0L
+    private var recentContextsSettled = false
+    private var featuredSettled = false
+    private var newReleasesSettled = false
+    private var playlistsSettled = false
+    private var savedAlbumsSettled = false
+    private var savedShowsSettled = false
+    private var savedAudiobooksSettled = false
+    private var devicesSettled = false
+    private val playlistsLoadMutex = Mutex()
+    private val savedAlbumsLoadMutex = Mutex()
+    private val savedShowsLoadMutex = Mutex()
+    private val savedAudiobooksLoadMutex = Mutex()
 
     // ── Lifecycle ────────────────────────────────────────────────────
 
@@ -447,7 +490,10 @@ class SpotifyViewModel(
                         return@collectLatest
                     }
                     lastObservedProfileId = resolvedProfileId
-                    refreshForActiveProfile(shouldClearProfileData)
+                    refreshForActiveProfile(
+                        profileId = resolvedProfileId,
+                        clearProfileData = shouldClearProfileData
+                    )
                 }
         }
 
@@ -467,6 +513,12 @@ class SpotifyViewModel(
             tokenManager.dailyDriveNewsIdFlow.collect { _dailyDriveNewsId.value = it }
         }
         viewModelScope.launch {
+            tokenManager.loggingEnabledFlow.collect {
+                _loggingEnabled.value = it
+                com.cloudbridge.spotify.util.AppLogger.setEnabled(it)
+            }
+        }
+        viewModelScope.launch {
             tokenManager.rateLimitUntilEpochMsFlow.collect { _rateLimitUntilEpochMs.value = it }
         }
     }
@@ -474,36 +526,108 @@ class SpotifyViewModel(
     override fun onCleared() {
         super.onCleared()
         metadataSyncJob?.cancel()
+        startupRecoveryJob?.cancel()
     }
 
     private suspend fun enterProfileSetupMode() {
         metadataSyncJob?.cancel()
         metadataSyncJob = null
+        startupRecoveryJob?.cancel()
+        startupRecoveryJob = null
         homeFeedJob?.cancel()
         libraryJob?.cancel()
         searchJob?.cancel()
         podcastUpdatesJob?.cancel()
         backStack.clear()
+        clearProfileScopedData()
         _showNowPlaying.value = false
         _playbackState.value = null
         _isTrackSaved.value = false
         _currentScreen.value = Screen.AddProfile()
     }
 
-    private suspend fun refreshForActiveProfile(clearProfileData: Boolean) {
+    private suspend fun refreshForActiveProfile(
+        profileId: String,
+        clearProfileData: Boolean
+    ) {
         if (clearProfileData) {
             clearProfileScopedData()
         }
 
+        lastStartupRecoveryAttemptAtMs = System.currentTimeMillis()
         loadLockedDeviceSetting()
-        loadHomeFeed()
-        loadLibrary()
-        loadDevices()
+        loadHomeFeed(forceRefresh = clearProfileData)
+        loadLibrary(forceRefresh = clearProfileData)
+        loadDevices(forceRefresh = clearProfileData)
         startMetadataSync(forceRestart = clearProfileData, immediateSync = true)
+        scheduleStartupRecovery(profileId)
     }
 
     fun refreshPlaybackStateNow() {
         startMetadataSync(immediateSync = true)
+    }
+
+    fun refreshStartupDataIfNeeded() {
+        if (shouldForceProfileSetup()) return
+
+        val profileId = activeProfileId.value ?: lastObservedProfileId ?: return
+        if (!isStartupBootstrapIncomplete()) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastStartupRecoveryAttemptAtMs < STARTUP_RESUME_RECHECK_MIN_INTERVAL_MS) {
+            return
+        }
+
+        AppLogger.i(TAG, "Resumed with incomplete startup data; retrying initial sync")
+        lastStartupRecoveryAttemptAtMs = now
+        loadHomeFeed(forceRefresh = true)
+        loadLibrary(forceRefresh = true)
+        loadDevices(forceRefresh = true)
+        scheduleStartupRecovery(profileId)
+    }
+
+    private fun scheduleStartupRecovery(profileId: String) {
+        startupRecoveryJob?.cancel()
+        startupRecoveryJob = viewModelScope.launch {
+            repeat(STARTUP_RECOVERY_MAX_ATTEMPTS) { attemptIndex ->
+                delay(STARTUP_RECOVERY_RETRY_DELAY_MS)
+
+                if (!isActive) return@launch
+                if (shouldForceProfileSetup() || activeProfileId.value != profileId) return@launch
+                if (!isStartupBootstrapIncomplete()) return@launch
+
+                lastStartupRecoveryAttemptAtMs = System.currentTimeMillis()
+                AppLogger.w(
+                    TAG,
+                    "Startup bootstrap incomplete; retrying initial sync (attempt ${attemptIndex + 1}/$STARTUP_RECOVERY_MAX_ATTEMPTS)"
+                )
+                loadHomeFeed(forceRefresh = true)
+                loadLibrary(forceRefresh = true)
+                loadDevices(forceRefresh = true)
+            }
+        }
+    }
+
+    private fun isStartupBootstrapIncomplete(): Boolean {
+        return !isHomeDataSettled() || !isLibraryDataSettled() || !devicesSettled
+    }
+
+    private fun isHomeDataSettled(): Boolean =
+        recentContextsSettled && featuredSettled && newReleasesSettled
+
+    private fun isLibraryDataSettled(): Boolean =
+        playlistsSettled && savedAlbumsSettled && savedShowsSettled && savedAudiobooksSettled
+
+    private fun shouldSkipHomeRefresh(forceRefresh: Boolean): Boolean {
+        if (forceRefresh) return false
+        if (!isHomeDataSettled()) return false
+        return System.currentTimeMillis() - lastHomeLoadCompletedAtMs < HOME_REFRESH_COOLDOWN_MS
+    }
+
+    private fun shouldSkipLibraryRefresh(forceRefresh: Boolean): Boolean {
+        if (forceRefresh) return false
+        if (!isLibraryDataSettled()) return false
+        return System.currentTimeMillis() - lastLibraryLoadCompletedAtMs < LIBRARY_REFRESH_COOLDOWN_MS
     }
 
     private fun prefetchImages(urls: List<String?>) {
@@ -535,6 +659,7 @@ class SpotifyViewModel(
             return
         }
         if (_currentScreen.value != screen) {
+            AppLogger.d(TAG, "Navigate: ${_currentScreen.value::class.simpleName} → ${screen::class.simpleName}")
             backStack.add(_currentScreen.value)
             _currentScreen.value = screen
         }
@@ -637,12 +762,11 @@ class SpotifyViewModel(
      * calls and avoiding the 429 bursts that occurred when both methods
      * independently called `getTopArtists` in parallel.
      */
-    fun loadHomeFeed() {
-        // Only skip if *all* sections already loaded (not just recentContexts)
-        if (_recentContexts.value.isNotEmpty() &&
-            _featuredPlaylists.value.isNotEmpty() &&
-            _newReleases.value.isNotEmpty()
-        ) return
+    fun loadHomeFeed(forceRefresh: Boolean = false) {
+        if (shouldSkipHomeRefresh(forceRefresh)) {
+            AppLogger.d(TAG, "Skipping home refresh; recent data is still warm")
+            return
+        }
         homeFeedJob?.cancel()
         homeFeedJob = viewModelScope.launch {
             _isHomeLoading.value = true
@@ -655,8 +779,9 @@ class SpotifyViewModel(
                         try {
                             api.getTopArtists(limit = 5, timeRange = "short_term")
                         } catch (e: Exception) {
+                            rethrowIfCancellation(e)
                             handleApiFailure(e)
-                            Log.w(TAG, "Could not load top artists: ${e.message}")
+                            AppLogger.w(TAG, "Could not load top artists: ${e.message}")
                             null
                         }
                     }
@@ -668,9 +793,15 @@ class SpotifyViewModel(
                     launch { loadNewReleases(topArtists) }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error loading home feed: ${e.message}", e)
+                rethrowIfCancellation(e)
+                AppLogger.e(TAG, "Error loading home feed: ${e.message}", e)
             } finally {
-                _isHomeLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    if (isHomeDataSettled()) {
+                        lastHomeLoadCompletedAtMs = System.currentTimeMillis()
+                    }
+                    _isHomeLoading.value = false
+                }
             }
         }
     }
@@ -727,9 +858,10 @@ class SpotifyViewModel(
             if (dailyDriveArts.isNotEmpty()) artMap[CUSTOM_MIX_DAILY_DRIVE] = dailyDriveArts
 
             _customMixArt.value = artMap
-            Log.d(TAG, "Custom mix art loaded for ${artMap.size} mixes")
+            AppLogger.d(TAG, "Custom mix art loaded for ${artMap.size} mixes")
         } catch (e: Exception) {
-            Log.w(TAG, "Could not load custom mix art: ${e.message}")
+            rethrowIfCancellation(e)
+            AppLogger.w(TAG, "Could not load custom mix art: ${e.message}")
         }
     }
 
@@ -821,17 +953,32 @@ class SpotifyViewModel(
             _searchResults.value = (playlists + albums + tracks).distinctBy { it.uri }
             _isOffline.value = false
         } catch (e: Exception) {
+            rethrowIfCancellation(e)
             handleApiFailure(e)
-            Log.e(TAG, "Search failed: ${e.message}", e)
+            AppLogger.e(TAG, "Search failed: ${e.message}", e)
             if (e !is GlobalRateLimitException) {
                 _searchResults.value = emptyList()
             }
         } finally {
-            _isSearchLoading.value = false
+            if (currentCoroutineContext().isActive) {
+                _isSearchLoading.value = false
+            }
         }
     }
 
     fun loadLibrary() {
+        if (shouldSkipLibraryRefresh(forceRefresh = false)) {
+            AppLogger.d(TAG, "Skipping library refresh; cached sections are still warm")
+            return
+        }
+        loadLibrary(forceRefresh = false)
+    }
+
+    fun loadLibrary(forceRefresh: Boolean = false) {
+        if (shouldSkipLibraryRefresh(forceRefresh)) {
+            AppLogger.d(TAG, "Skipping library refresh; cached sections are still warm")
+            return
+        }
         libraryJob?.cancel()
         libraryJob = viewModelScope.launch {
             _isLibraryLoading.value = true
@@ -843,9 +990,15 @@ class SpotifyViewModel(
                     launch { loadSavedAudiobooks() }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error loading library: ${e.message}", e)
+                rethrowIfCancellation(e)
+                AppLogger.e(TAG, "Error loading library: ${e.message}", e)
             } finally {
-                _isLibraryLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    if (isLibraryDataSettled()) {
+                        lastLibraryLoadCompletedAtMs = System.currentTimeMillis()
+                    }
+                    _isLibraryLoading.value = false
+                }
             }
         }
     }
@@ -886,7 +1039,8 @@ class SpotifyViewModel(
                                     imageUrl = bestArtwork(playlist.images),
                                     type = type
                                 )
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                rethrowIfCancellation(e)
                                 null
                             }
                         }
@@ -902,7 +1056,8 @@ class SpotifyViewModel(
                                     imageUrl = bestArtwork(album.images),
                                     type = type
                                 )
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                rethrowIfCancellation(e)
                                 null
                             }
                         }
@@ -914,8 +1069,10 @@ class SpotifyViewModel(
 
             _recentContexts.value = hydrationJobs.awaitAll().filterNotNull()
             prefetchImages(_recentContexts.value.map { it.imageUrl })
+            recentContextsSettled = true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load recent contexts: ${e.message}")
+            rethrowIfCancellation(e)
+            AppLogger.e(TAG, "Failed to load recent contexts: ${e.message}")
         }
     }
 
@@ -937,10 +1094,12 @@ class SpotifyViewModel(
         try {
             _featuredPlaylists.value = loadLibraryFeaturedPlaylists(limit = 12)
             _isOffline.value = false
-            Log.d(TAG, "Loaded ${_featuredPlaylists.value.size} suggested playlists")
+            featuredSettled = true
+            AppLogger.d(TAG, "Loaded ${_featuredPlaylists.value.size} suggested playlists")
         } catch (e: Exception) {
+            rethrowIfCancellation(e)
             handleApiFailure(e)
-            Log.e(TAG, "Failed to load featured: ${e.message}")
+            AppLogger.e(TAG, "Failed to load featured: ${e.message}")
         }
     }
 
@@ -988,8 +1147,9 @@ class SpotifyViewModel(
             _topTracks.value = response.items.filterNotNull()
             _isOffline.value = false
         } catch (e: Exception) {
+            rethrowIfCancellation(e)
             handleApiFailure(e)
-            Log.e(TAG, "Failed to load top tracks: ${e.message}")
+            AppLogger.e(TAG, "Failed to load top tracks: ${e.message}")
         }
     }
 
@@ -1015,86 +1175,130 @@ class SpotifyViewModel(
             }
             _newReleases.value = albums.distinctBy { it.id }.take(12)
             _isOffline.value = false
-            Log.d(TAG, "Loaded ${_newReleases.value.size} release tiles from top artists")
+            newReleasesSettled = true
+            AppLogger.d(TAG, "Loaded ${_newReleases.value.size} release tiles from top artists")
         } catch (e: Exception) {
+            rethrowIfCancellation(e)
             handleApiFailure(e)
-            Log.e(TAG, "Failed to load new releases: ${e.message}")
+            AppLogger.e(TAG, "Failed to load new releases: ${e.message}")
         }
     }
 
     private suspend fun loadPlaylists() = withContext(Dispatchers.IO) {
-        // Seed UI from cache so the list appears immediately, then refresh from network
-        if (_playlists.value.isEmpty()) {
-            val cached = libraryRepository.getCachedPlaylists()
-            if (cached.isNotEmpty()) {
-                _playlists.value = cached
-                Log.d(TAG, "Preloaded ${cached.size} playlists from cache")
+        playlistsLoadMutex.withLock {
+            // Seed UI from cache so the list appears immediately, then refresh from network
+            var usedCachedData = false
+            if (_playlists.value.isEmpty()) {
+                val cached = libraryRepository.getCachedPlaylists()
+                if (cached.isNotEmpty()) {
+                    _playlists.value = cached
+                    usedCachedData = true
+                    AppLogger.d(TAG, "Preloaded ${cached.size} playlists from cache")
+                }
             }
-        }
-        try {
-            val fresh = libraryRepository.refreshPlaylists()
-            _playlists.value = fresh
-            Log.d(TAG, "Loaded ${fresh.size} playlists")
-            prefetchImages(fresh.map { bestArtwork(it.images) })
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load playlists: ${e.message}")
+
+            try {
+                val fresh = libraryRepository.refreshPlaylists()
+                _playlists.value = fresh
+                playlistsSettled = true
+                AppLogger.d(TAG, "Loaded ${fresh.size} playlists")
+                prefetchImages(fresh.map { bestArtwork(it.images) })
+            } catch (e: Exception) {
+                rethrowIfCancellation(e)
+                if (usedCachedData || _playlists.value.isNotEmpty()) {
+                    playlistsSettled = true
+                    AppLogger.w(TAG, "Playlist refresh failed; keeping cached library data warm")
+                }
+                AppLogger.e(TAG, "Failed to load playlists: ${e.message}")
+            }
         }
     }
 
     private suspend fun loadSavedAlbums() = withContext(Dispatchers.IO) {
-        // Seed UI from cache so albums list appears immediately
-        if (_savedAlbums.value.isEmpty()) {
-            val cached = libraryRepository.getCachedAlbums()
-            if (cached.isNotEmpty()) {
-                _savedAlbums.value = cached
-                Log.d(TAG, "Preloaded ${cached.size} albums from cache")
+        savedAlbumsLoadMutex.withLock {
+            // Seed UI from cache so albums list appears immediately
+            var usedCachedData = false
+            if (_savedAlbums.value.isEmpty()) {
+                val cached = libraryRepository.getCachedAlbums()
+                if (cached.isNotEmpty()) {
+                    _savedAlbums.value = cached
+                    usedCachedData = true
+                    AppLogger.d(TAG, "Preloaded ${cached.size} albums from cache")
+                }
             }
-        }
-        try {
-            val fresh = libraryRepository.refreshSavedAlbums()
-            _savedAlbums.value = fresh
-            prefetchImages(fresh.map { bestArtwork(it.images) })
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to load saved albums: ${e.message}")
+
+            try {
+                val fresh = libraryRepository.refreshSavedAlbums()
+                _savedAlbums.value = fresh
+                savedAlbumsSettled = true
+                prefetchImages(fresh.map { bestArtwork(it.images) })
+            } catch (e: Exception) {
+                rethrowIfCancellation(e)
+                if (usedCachedData || _savedAlbums.value.isNotEmpty()) {
+                    savedAlbumsSettled = true
+                    AppLogger.w(TAG, "Saved albums refresh failed; keeping cached library data warm")
+                }
+                AppLogger.e(TAG, "Failed to load saved albums: ${e.message}")
+            }
         }
     }
 
     private suspend fun loadSavedShows() = withContext(Dispatchers.IO) {
-        if (_savedShows.value.isNotEmpty()) return@withContext
-        // Seed UI from cache
-        val cached = libraryRepository.getCachedShows()
-        if (cached.isNotEmpty()) {
-            _savedShows.value = cached
-            Log.d(TAG, "Preloaded ${cached.size} shows from cache")
-        }
-        try {
-            val fresh = libraryRepository.refreshSavedShows()
-            _savedShows.value = fresh
-            _isOffline.value = false
-            prefetchImages(fresh.map { bestArtwork(it.images) })
-            refreshPodcastUpdates(fresh)
-        } catch (e: Exception) {
-            handleApiFailure(e)
-            Log.e(TAG, "Failed to load saved shows: ${e.message}")
+        savedShowsLoadMutex.withLock {
+            if (_savedShows.value.isNotEmpty()) return@withLock
+            // Seed UI from cache
+            var usedCachedData = false
+            val cached = libraryRepository.getCachedShows()
+            if (cached.isNotEmpty()) {
+                _savedShows.value = cached
+                usedCachedData = true
+                AppLogger.d(TAG, "Preloaded ${cached.size} shows from cache")
+            }
+            try {
+                val fresh = libraryRepository.refreshSavedShows()
+                _savedShows.value = fresh
+                _isOffline.value = false
+                savedShowsSettled = true
+                prefetchImages(fresh.map { bestArtwork(it.images) })
+                refreshPodcastUpdates(fresh)
+            } catch (e: Exception) {
+                rethrowIfCancellation(e)
+                handleApiFailure(e)
+                if (usedCachedData || _savedShows.value.isNotEmpty()) {
+                    savedShowsSettled = true
+                    AppLogger.w(TAG, "Saved shows refresh failed; keeping cached library data warm")
+                }
+                AppLogger.e(TAG, "Failed to load saved shows: ${e.message}")
+            }
         }
     }
 
     private suspend fun loadSavedAudiobooks() = withContext(Dispatchers.IO) {
-        if (_savedAudiobooks.value.isNotEmpty()) return@withContext
-        // Seed UI from cache
-        val cached = libraryRepository.getCachedAudiobooks()
-        if (cached.isNotEmpty()) {
-            _savedAudiobooks.value = cached
-            Log.d(TAG, "Preloaded ${cached.size} audiobooks from cache")
-        }
-        try {
-            val fresh = libraryRepository.refreshSavedAudiobooks()
-            _savedAudiobooks.value = fresh
-            _isOffline.value = false
-            prefetchImages(fresh.map { bestArtwork(it.images) })
-        } catch (e: Exception) {
-            handleApiFailure(e)
-            Log.e(TAG, "Failed to load saved audiobooks: ${e.message}")
+        savedAudiobooksLoadMutex.withLock {
+            if (_savedAudiobooks.value.isNotEmpty()) return@withLock
+            // Seed UI from cache
+            var usedCachedData = false
+            val cached = libraryRepository.getCachedAudiobooks()
+            if (cached.isNotEmpty()) {
+                _savedAudiobooks.value = cached
+                usedCachedData = true
+                AppLogger.d(TAG, "Preloaded ${cached.size} audiobooks from cache")
+            }
+            try {
+                val fresh = libraryRepository.refreshSavedAudiobooks()
+                _savedAudiobooks.value = fresh
+                _isOffline.value = false
+                savedAudiobooksSettled = true
+                prefetchImages(fresh.map { bestArtwork(it.images) })
+            } catch (e: Exception) {
+                rethrowIfCancellation(e)
+                handleApiFailure(e)
+                if (usedCachedData || _savedAudiobooks.value.isNotEmpty()) {
+                    savedAudiobooksSettled = true
+                    AppLogger.w(TAG, "Saved audiobooks refresh failed; keeping cached library data warm")
+                }
+                AppLogger.e(TAG, "Failed to load saved audiobooks: ${e.message}")
+            }
         }
     }
 
@@ -1110,11 +1314,14 @@ class SpotifyViewModel(
                 }
                 _detailChapters.value = chapters
             } catch (e: Exception) {
+                rethrowIfCancellation(e)
                 handleApiFailure(e)
-                Log.e(TAG, "Failed to load chapters for audiobook $audiobookId: ${e.message}")
+                AppLogger.e(TAG, "Failed to load chapters for audiobook $audiobookId: ${e.message}")
                 _detailError.value = "Could not load chapters.\n${e.message}"
             } finally {
-                _isDetailLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    _isDetailLoading.value = false
+                }
             }
         }
     }
@@ -1178,7 +1385,7 @@ class SpotifyViewModel(
         } catch (_: CancellationException) {
             null
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to load podcast freshness for ${show.name}: ${e.message}")
+            AppLogger.w(TAG, "Failed to load podcast freshness for ${show.name}: ${e.message}")
             null
         }
     }
@@ -1207,6 +1414,7 @@ class SpotifyViewModel(
                 } while (page.next != null && offset < page.total)
                 _isOffline.value = false
             } catch (e: Exception) {
+                rethrowIfCancellation(e)
                 if (e is retrofit2.HttpException && e.code() == 403) {
                     // 403 = Spotify denied the items request. Possible causes:
                     // 1) Token lacks playlist-read-private / playlist-read-collaborative scope.
@@ -1218,7 +1426,7 @@ class SpotifyViewModel(
                     // 3) The playlist is Spotify-curated (editorial) — these are blocked for dev apps.
                     // 4) Stale APK calling a removed endpoint (e.g. /tracks instead of /items).
                     //    → Rebuild and reinstall the latest APK.
-                    Log.w(TAG, "403 Forbidden loading playlist $playlistId — possible causes: missing scope, dev-mode quota, curated playlist, or removed API endpoint.")
+                    AppLogger.w(TAG, "403 Forbidden loading playlist $playlistId — possible causes: missing scope, dev-mode quota, curated playlist, or removed API endpoint.")
                     _detailError.value = buildString {
                         appendLine("Spotify returned 403 — playlist access denied.")
                         appendLine()
@@ -1232,10 +1440,12 @@ class SpotifyViewModel(
                     _detailError.value = buildRateLimitMessage(e.lockedUntilEpochMs)
                 } else {
                     handleApiFailure(e)
-                    Log.e(TAG, "Failed to load playlist tracks: ${e.message}")
+                    AppLogger.e(TAG, "Failed to load playlist tracks: ${e.message}")
                 }
             } finally {
-                _isDetailLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    _isDetailLoading.value = false
+                }
             }
         }
     }
@@ -1246,13 +1456,16 @@ class SpotifyViewModel(
             _detailTracks.value = emptyList()
             _detailError.value = null
             try {
-                _detailTracks.value = libraryRepository.getSavedTracks(maxTracks = Int.MAX_VALUE)
+                _detailTracks.value = libraryRepository.getSavedTracks(maxTracks = MAX_LIKED_SONGS_DETAIL_LOAD)
                 _isOffline.value = false
             } catch (e: Exception) {
+                rethrowIfCancellation(e)
                 handleApiFailure(e)
-                Log.e(TAG, "Failed to load liked songs: ${e.message}")
+                AppLogger.e(TAG, "Failed to load liked songs: ${e.message}")
             } finally {
-                _isDetailLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    _isDetailLoading.value = false
+                }
             }
         }
     }
@@ -1275,14 +1488,17 @@ class SpotifyViewModel(
                     offset += 50
                 } while (page.next != null && offset < page.total)
             } catch (e: Exception) {
+                rethrowIfCancellation(e)
                 if (e is GlobalRateLimitException) {
                     _detailError.value = buildRateLimitMessage(e.lockedUntilEpochMs)
                 } else {
                     handleApiFailure(e)
                 }
-                Log.e(TAG, "Failed to load album tracks: ${e.message}")
+                AppLogger.e(TAG, "Failed to load album tracks: ${e.message}")
             } finally {
-                _isDetailLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    _isDetailLoading.value = false
+                }
             }
         }
     }
@@ -1300,13 +1516,16 @@ class SpotifyViewModel(
                 _detailEpisodes.value = libraryRepository.getShowEpisodes(showId)
                 _isOffline.value = false
             } catch (e: Exception) {
+                rethrowIfCancellation(e)
                 handleApiFailure(e)
                 if (e is GlobalRateLimitException) {
                     _detailError.value = buildRateLimitMessage(e.lockedUntilEpochMs)
                 }
-                Log.e(TAG, "Failed to load show episodes: ${e.message}")
+                AppLogger.e(TAG, "Failed to load show episodes: ${e.message}")
             } finally {
-                _isDetailLoading.value = false
+                if (currentCoroutineContext().isActive) {
+                    _isDetailLoading.value = false
+                }
             }
         }
     }
@@ -1326,14 +1545,35 @@ class SpotifyViewModel(
             val derivedUpNext = currentItem?.let { deriveUpNextItems(it, normalizedQueue) }.orEmpty()
 
             _upNext.value = derivedUpNext
-            _queue.value = normalizedQueue.filterNot { queuedItem ->
-                derivedUpNext.any { upNextItem -> upNextItem.uri == queuedItem.uri }
-            }
+            _queue.value = withStableQueueIds(
+                normalizedQueue.filterNot { queuedItem ->
+                    derivedUpNext.any { upNextItem -> upNextItem.uri == queuedItem.uri }
+                }
+            )
             lastQueueSyncAtMs = System.currentTimeMillis()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load queue: ${e.message}")
+            rethrowIfCancellation(e)
+            AppLogger.e(TAG, "Failed to load queue: ${e.message}")
         }
     }
+
+    private fun withStableQueueIds(queueItems: List<SpotifyPlayableItem>): List<QueueItem> {
+        if (queueItems.isEmpty()) return emptyList()
+
+        val previousByIdentity = mutableMapOf<String, MutableList<QueueItem>>()
+        _queue.value.forEach { queueItem ->
+            previousByIdentity.getOrPut(queueIdentity(queueItem.track)) { mutableListOf() }.add(queueItem)
+        }
+
+        return queueItems.map { track ->
+            val existing = previousByIdentity[queueIdentity(track)]
+                ?.takeIf { it.isNotEmpty() }
+                ?.removeAt(0)
+            existing?.copy(track = track) ?: QueueItem(track = track)
+        }
+    }
+
+    private fun queueIdentity(item: SpotifyPlayableItem): String = "${item.type}|${item.uri}"
 
     private fun shouldRefreshQueue(playbackItemChanged: Boolean): Boolean {
         if (playbackItemChanged) return true
@@ -1458,19 +1698,19 @@ class SpotifyViewModel(
         viewModelScope.launch {
             val resolvedUri = resolveTrackUriForPlayback(trackUri)
             val preserveContext = resolvedUri == trackUri && !contextUri.isNullOrBlank()
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 if (preserveContext) {
                     playbackController.play(trackUri = trackUri, contextUri = contextUri)
                 } else {
                     playbackController.play(trackUri = resolvedUri)
                 }
             }
+            val success = applyPlaybackCommandOutcome(outcome)
             if (success && preserveContext) {
                 rememberPlaybackContext(contextUri, tracksForContext(contextUri))
             } else if (success) {
                 clearRememberedPlaybackContext()
             }
-            _deviceNotFoundError.value = !success // Show error if false, clear if true
             delay(500)
             syncPlaybackState()
         }
@@ -1480,17 +1720,17 @@ class SpotifyViewModel(
         openNowPlaying()
         viewModelScope.launch {
             val contextTracks = tracksForContext(contextUri)
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 if (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri)) {
                     playResolvedTrackList(_detailTracks.value, rememberedContextUri = contextUri)
                 } else {
                     playbackController.play(trackUri = null, contextUri = contextUri)
                 }
             }
+            val success = applyPlaybackCommandOutcome(outcome)
             if (success) {
                 rememberPlaybackContext(contextUri, contextTracks)
             }
-            _deviceNotFoundError.value = !success
             delay(500)
             syncPlaybackState()
         }
@@ -1514,7 +1754,7 @@ class SpotifyViewModel(
                 }
             } catch (e: Exception) {
                 handleApiFailure(e)
-                Log.e(TAG, "Failed to enhance playlist $playlistId: ${e.message}", e)
+                AppLogger.e(TAG, "Failed to enhance playlist $playlistId: ${e.message}", e)
             }
         }
     }
@@ -1536,17 +1776,20 @@ class SpotifyViewModel(
                     CUSTOM_MIX_2000S -> customMixEngine.buildDecadeMix("200")
                     CUSTOM_MIX_2010S -> customMixEngine.buildDecadeMix("201")
                     else -> {
-                        Log.w(TAG, "Unknown custom mix requested: $mixId")
+                        AppLogger.w(TAG, "Unknown custom mix requested: $mixId")
                         emptyList()
                     }
                 }
 
                 val playbackUris = resolveUrisForPlayback(generatedUris)
-                val success = playbackUris.isNotEmpty() && attemptPlaybackCommandWithWakeup {
-                    playbackController.play(uris = playbackUris)
+                val outcome = if (playbackUris.isNotEmpty()) {
+                    attemptPlaybackCommandWithWakeup {
+                        playbackController.play(uris = playbackUris)
+                    }
+                } else {
+                    PlaybackCommandOutcome.Failed
                 }
-
-                _deviceNotFoundError.value = !success
+                val success = applyPlaybackCommandOutcome(outcome)
                 if (success) {
                     clearRememberedPlaybackContext()
                     _isOffline.value = false
@@ -1556,7 +1799,7 @@ class SpotifyViewModel(
                 }
             } catch (e: Exception) {
                 handleApiFailure(e)
-                Log.e(TAG, "playCustomMix failed for $mixId: ${e.message}", e)
+                AppLogger.e(TAG, "playCustomMix failed for $mixId: ${e.message}", e)
             } finally {
                 _isHomeLoading.value = false
             }
@@ -1572,7 +1815,7 @@ class SpotifyViewModel(
                 tokenManager.saveDailyDriveNewsId(normalized)
                 _dailyDriveNewsId.value = normalized
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to save Daily Drive news podcast: ${e.message}", e)
+                AppLogger.e(TAG, "Failed to save Daily Drive news podcast: ${e.message}", e)
             }
         }
     }
@@ -1580,17 +1823,20 @@ class SpotifyViewModel(
     fun playTrackInContext(trackUri: String, contextUri: String, index: Int) {
         openNowPlaying()
         viewModelScope.launch {
-            val success = if (
-                contextUri == "spotify:user:me:collection" ||
-                (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri))
-            ) {
-                playResolvedTrackList(
-                    tracks = _detailTracks.value.drop(index),
-                    rememberedContextUri = contextUri
-                )
-            } else {
-                playbackController.play(trackUri = trackUri, contextUri = contextUri, offsetPosition = index)
+            val outcome = attemptPlaybackCommandWithWakeup {
+                if (
+                    contextUri == "spotify:user:me:collection" ||
+                    (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri))
+                ) {
+                    playResolvedTrackList(
+                        tracks = _detailTracks.value.drop(index),
+                        rememberedContextUri = contextUri
+                    )
+                } else {
+                    playbackController.play(trackUri = trackUri, contextUri = contextUri, offsetPosition = index)
+                }
             }
+            val success = applyPlaybackCommandOutcome(outcome)
             if (success) {
                 val rememberedTracks = when {
                     contextUri == "spotify:user:me:collection" -> _detailTracks.value.drop(index)
@@ -1598,7 +1844,6 @@ class SpotifyViewModel(
                 }
                 rememberPlaybackContext(contextUri, rememberedTracks)
             }
-            _deviceNotFoundError.value = !success
             delay(500)
             syncPlaybackState()
         }
@@ -1607,16 +1852,17 @@ class SpotifyViewModel(
     fun togglePlayPause() {
         val current = _playbackState.value
         val isCurrentlyPlaying = current?.isPlaying == true
+        AppLogger.d(TAG, "togglePlayPause: currently=${if (isCurrentlyPlaying) "playing" else "paused"}")
         _playbackState.update { it?.copy(isPlaying = !isCurrentlyPlaying) } // Instant UI update
         viewModelScope.launch {
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 if (isCurrentlyPlaying) {
                     playbackController.pause()
                 } else {
                     playbackController.forceResume()
                 }
             }
-            _deviceNotFoundError.value = !success
+            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1625,10 +1871,10 @@ class SpotifyViewModel(
     fun resumePlayback() {
         openNowPlaying()
         viewModelScope.launch {
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 playbackController.forceResume()
             }
-            _deviceNotFoundError.value = !success
+            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1636,10 +1882,10 @@ class SpotifyViewModel(
 
     fun skipNext() {
         viewModelScope.launch {
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 playbackController.next()
             }
-            _deviceNotFoundError.value = !success
+            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1647,10 +1893,10 @@ class SpotifyViewModel(
 
     fun skipPrevious() {
         viewModelScope.launch {
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 playbackController.previous()
             }
-            _deviceNotFoundError.value = !success
+            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1660,27 +1906,63 @@ class SpotifyViewModel(
         try {
             val audioManager = context.applicationContext.getSystemService(android.content.Context.AUDIO_SERVICE) as? AudioManager
             if (audioManager == null) {
-                Log.w(TAG, "Bluetooth kickstart skipped: AudioManager unavailable")
+                AppLogger.w(TAG, "Bluetooth kickstart skipped: AudioManager unavailable")
+                return
+            }
+
+            if (audioManager.mode == AudioManager.MODE_IN_CALL ||
+                audioManager.mode == AudioManager.MODE_IN_COMMUNICATION ||
+                audioManager.mode == AudioManager.MODE_RINGTONE
+            ) {
+                AppLogger.w(TAG, "Bluetooth kickstart skipped: call or ringtone audio is active")
                 return
             }
 
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
             audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
-            Log.i(TAG, "Dispatched AVRCP Bluetooth kickstart")
+            AppLogger.i(TAG, "Dispatched AVRCP Bluetooth kickstart")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to dispatch AVRCP Bluetooth kickstart: ${e.message}", e)
+            AppLogger.e(TAG, "Failed to dispatch AVRCP Bluetooth kickstart: ${e.message}", e)
         }
     }
 
-    private suspend fun attemptPlaybackCommandWithWakeup(command: suspend () -> Boolean): Boolean {
-        val firstAttempt = command()
-        if (firstAttempt) return true
+    private suspend fun attemptPlaybackCommandWithWakeup(
+        command: suspend () -> Boolean
+    ): PlaybackCommandOutcome {
+        return try {
+            val firstAttempt = command()
+            if (firstAttempt) return PlaybackCommandOutcome.Success
 
-        Log.w(TAG, "Playback command failed; device is likely asleep. Attempting AVRCP Bluetooth kickstart.")
-        kickstartBluetoothMedia()
-        delay(BLUETOOTH_KICKSTART_DELAY_MS)
-        deviceManager.refreshDeviceId()
-        return command()
+            AppLogger.w(TAG, "Playback command failed; device is likely asleep. Attempting AVRCP Bluetooth kickstart.")
+            kickstartBluetoothMedia()
+            delay(BLUETOOTH_KICKSTART_DELAY_MS)
+            deviceManager.refreshDeviceId()
+            if (command()) PlaybackCommandOutcome.Success else PlaybackCommandOutcome.Failed
+        } catch (e: IOException) {
+            _isOffline.value = true
+            AppLogger.w(TAG, "Playback command network failure; skipping AVRCP wakeup: ${e.message}", e)
+            PlaybackCommandOutcome.NetworkFailure
+        }
+    }
+
+    private fun applyPlaybackCommandOutcome(outcome: PlaybackCommandOutcome): Boolean {
+        return when (outcome) {
+            PlaybackCommandOutcome.Success -> {
+                _isOffline.value = false
+                _deviceNotFoundError.value = false
+                true
+            }
+
+            PlaybackCommandOutcome.Failed -> {
+                _deviceNotFoundError.value = true
+                false
+            }
+
+            PlaybackCommandOutcome.NetworkFailure -> {
+                _deviceNotFoundError.value = false
+                false
+            }
+        }
     }
 
     fun skipBack15Seconds() {
@@ -1737,7 +2019,7 @@ class SpotifyViewModel(
                 lastSavedStatusTrackUri = null
                 lastSavedStatusCheckedAtMs = 0L
             } catch (e: Exception) {
-                Log.e(TAG, "Toggle save failed: ${e.message}")
+                AppLogger.e(TAG, "Toggle save failed: ${e.message}")
             }
         }
     }
@@ -1776,23 +2058,19 @@ class SpotifyViewModel(
     }
 
     /**
-     * Removes a track from the local queue display by index.
+     * Removes a track from the local queue display by stable local identity.
      *
      * **Important limitation**: Spotify's Web API does not support
-     * removing a specific track from the playback queue by index.
+     * removing a specific track from the playback queue by identity.
      * This method only updates the local [_queue] StateFlow so the
      * UI reflects the dismissal; the track will still play on the phone.
      *
-     * @param index Zero-based index of the track to remove.
+     * @param uniqueId Stable local ID of the track to remove.
      */
-    fun removeFromQueue(index: Int) {
-        // Spotify's Web API doesn't support removing by index from queue.
+    fun removeFromQueue(uniqueId: String) {
+        // Spotify's Web API doesn't support removing by queue item identity.
         // We update local state only; the track will still play.
-        _queue.update { current ->
-            current.toMutableList().apply {
-                if (index in indices) removeAt(index)
-            }
-        }
+        _queue.update { current -> current.filterNot { it.uniqueId == uniqueId } }
     }
 
     fun startRadioFromCurrentTrack() {
@@ -1979,7 +2257,7 @@ class SpotifyViewModel(
                     playback.item.uri?.let { trackUri ->
                         refreshSavedTrackStatus(
                             trackUri = trackUri,
-                            force = playbackItemChanged || _showNowPlaying.value
+                            force = playbackItemChanged
                         )
                     }
                 } else {
@@ -1995,7 +2273,7 @@ class SpotifyViewModel(
                 if (withinPodcastTolerance) {
                     val now = System.currentTimeMillis()
                     if (now - lastPodcastBlindSpotLoggedAtMs >= 15_000L) {
-                        Log.i(TAG, "Playback blind spot during podcast metadata sync; preserving local state until Spotify resumes reporting")
+                        AppLogger.i(TAG, "Playback blind spot during podcast metadata sync; preserving local state until Spotify resumes reporting")
                         lastPodcastBlindSpotLoggedAtMs = now
                     }
                     _playbackState.update { current ->
@@ -2015,18 +2293,21 @@ class SpotifyViewModel(
             }
         } catch (e: GlobalRateLimitException) {
             handleApiFailure(e)
-            Log.w(TAG, "Metadata sync blocked by global rate limit until ${e.lockedUntilEpochMs}")
+            AppLogger.w(TAG, "Metadata sync blocked by global rate limit until ${e.lockedUntilEpochMs}")
         } catch (e: retrofit2.HttpException) {
             handleApiFailure(e)
-            Log.w(TAG, "HTTP error during metadata sync: ${e.code()} ${e.message}")
+            AppLogger.w(TAG, "HTTP error during metadata sync: ${e.code()} ${e.message}")
         } catch (e: UnknownHostException) {
             _isOffline.value = true
-            Log.w(TAG, "Metadata sync offline: ${e.message}")
+            AppLogger.w(TAG, "Metadata sync offline: ${e.message}")
         } catch (e: SocketTimeoutException) {
             _isOffline.value = true
-            Log.w(TAG, "Metadata sync timeout: ${e.message}")
+            AppLogger.w(TAG, "Metadata sync timeout: ${e.message}")
+        } catch (e: java.io.IOException) {
+            _isOffline.value = true
+            AppLogger.w(TAG, "Metadata sync I/O error: ${e.message}")
         } catch (e: Exception) {
-            Log.w(TAG, "Metadata sync error: ${e.message}")
+            AppLogger.w(TAG, "Metadata sync error: ${e.message}")
         }
     }
 
@@ -2064,20 +2345,24 @@ class SpotifyViewModel(
             _lockedDeviceName.value = lockedName
             deviceManager.lockedDeviceId = lockedId
             if (lockedId != null) {
-                Log.i(TAG, "Device locked to: $lockedName ($lockedId)")
+                AppLogger.i(TAG, "Device locked to: $lockedName ($lockedId)")
             }
         }
     }
 
     /** Fetch available Spotify Connect devices for the settings screen. */
-    fun loadDevices() {
+    fun loadDevices(forceRefresh: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val response = api.getDevices()
                 _deviceList.value = response.devices
-                Log.d(TAG, "Loaded ${response.devices.size} devices")
+                devicesSettled = true
+                AppLogger.d(TAG, "Loaded ${response.devices.size} devices")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load devices: ${e.message}")
+                if (!forceRefresh && (_deviceList.value.isNotEmpty() || !_lockedDeviceId.value.isNullOrBlank())) {
+                    devicesSettled = true
+                }
+                AppLogger.e(TAG, "Failed to load devices: ${e.message}")
             }
         }
     }
@@ -2089,7 +2374,7 @@ class SpotifyViewModel(
             _lockedDeviceId.value = deviceId
             _lockedDeviceName.value = deviceName
             deviceManager.lockedDeviceId = deviceId
-            Log.i(TAG, "Locked to device: $deviceName ($deviceId)")
+            AppLogger.i(TAG, "Locked to device: $deviceName ($deviceId)")
         }
     }
 
@@ -2100,13 +2385,20 @@ class SpotifyViewModel(
             _lockedDeviceId.value = null
             _lockedDeviceName.value = null
             deviceManager.lockedDeviceId = null
-            Log.i(TAG, "Device unlocked — auto-discovery enabled")
+            AppLogger.i(TAG, "Device unlocked — auto-discovery enabled")
+        }
+    }
+
+    fun disableBluetoothAutoLaunch() {
+        viewModelScope.launch(Dispatchers.IO) {
+            tokenManager.saveBtAutoLaunchMac(null)
+            AppLogger.i(TAG, "Bluetooth auto-launch disabled")
         }
     }
 
     fun switchActiveProfile(profileId: String) {
         if (profileId == activeProfileId.value) return
-
+        AppLogger.i(TAG, "Switching active profile: ${activeProfileId.value} → $profileId")
         viewModelScope.launch(Dispatchers.IO) {
             tokenManager.setActiveProfileId(profileId)
         }
@@ -2124,6 +2416,7 @@ class SpotifyViewModel(
         _featuredPlaylists.value = emptyList()
         _topTracks.value = emptyList()
         _newReleases.value = emptyList()
+        _customMixArt.value = emptyMap()
         _podcastUpdates.value = emptyMap()
         _playlists.value = emptyList()
         _savedAlbums.value = emptyList()
@@ -2151,6 +2444,16 @@ class SpotifyViewModel(
         _requiresReauth.value = false
         _showNowPlaying.value = false
         lastSavedStatusTrackUri = null
+        lastHomeLoadCompletedAtMs = 0L
+        lastLibraryLoadCompletedAtMs = 0L
+        recentContextsSettled = false
+        featuredSettled = false
+        newReleasesSettled = false
+        playlistsSettled = false
+        savedAlbumsSettled = false
+        savedShowsSettled = false
+        savedAudiobooksSettled = false
+        devicesSettled = false
         libraryTab = 0
     }
 
@@ -2168,7 +2471,7 @@ class SpotifyViewModel(
                     val followed = api.getFollowedArtists(limit = 50)
                     artists += followed.artists.items.filterNotNull()
                 } catch (e: Exception) {
-                    Log.w(TAG, "Followed artists unavailable (missing scope?): ${e.message}")
+                    AppLogger.w(TAG, "Followed artists unavailable (missing scope?): ${e.message}")
                 }
 
                 // Supplement with top artists (always available)
@@ -2180,13 +2483,13 @@ class SpotifyViewModel(
                         }
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Top artists failed: ${e.message}")
+                    AppLogger.w(TAG, "Top artists failed: ${e.message}")
                 }
 
                 _followedArtists.value = artists
-                Log.d(TAG, "Loaded ${artists.size} artists")
+                AppLogger.d(TAG, "Loaded ${artists.size} artists")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load artists: ${e.message}")
+                AppLogger.e(TAG, "Failed to load artists: ${e.message}")
             }
         }
     }
@@ -2206,7 +2509,7 @@ class SpotifyViewModel(
                         try {
                             api.getArtist(artistId)
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to load artist profile: ${e.message}")
+                            AppLogger.e(TAG, "Failed to load artist profile: ${e.message}")
                             null
                         }
                     }
@@ -2219,7 +2522,7 @@ class SpotifyViewModel(
                             val artistName = artistProfileDeferred.await()?.name
                             _artistTopTracks.value = loadArtistTopTracks(artistId, artistName)
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to load artist top tracks: ${e.message}")
+                            AppLogger.e(TAG, "Failed to load artist top tracks: ${e.message}")
                         }
                     }
                     launch {
@@ -2227,7 +2530,7 @@ class SpotifyViewModel(
                             val albums = api.getArtistAlbums(artistId, limit = 20)
                             _artistAlbums.value = albums.items.filterNotNull()
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to load artist albums: ${e.message}")
+                            AppLogger.e(TAG, "Failed to load artist albums: ${e.message}")
                         }
                     }
                     launch {
@@ -2235,7 +2538,7 @@ class SpotifyViewModel(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load artist detail: ${e.message}")
+                AppLogger.e(TAG, "Failed to load artist detail: ${e.message}")
             } finally {
                 _isDetailLoading.value = false
             }
@@ -2292,9 +2595,9 @@ class SpotifyViewModel(
             } while (response.next != null && page < maxPages)
 
             _artistLikedSongs.value = liked
-            Log.d(TAG, "Found ${liked.size} liked songs for artist $artistId")
+            AppLogger.d(TAG, "Found ${liked.size} liked songs for artist $artistId")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load artist liked songs: ${e.message}")
+            AppLogger.e(TAG, "Failed to load artist liked songs: ${e.message}")
         }
     }
 
@@ -2309,6 +2612,42 @@ class SpotifyViewModel(
     }
     fun updateExplicitFilterEnabled(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) { tokenManager.saveExplicitFilterEnabled(enabled) }
+    }
+    fun updateLoggingEnabled(enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) { tokenManager.saveLoggingEnabled(enabled) }
+    }
+    fun exportLogs(onComplete: (java.io.File?) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val file = com.cloudbridge.spotify.util.AppLogger.exportLogs(context)
+            withContext(Dispatchers.Main) { onComplete(file) }
+        }
+    }
+
+    fun writeExportedLogsToUri(
+        sourceFile: java.io.File,
+        destinationUri: Uri,
+        onComplete: (Boolean) -> Unit
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = try {
+                context.contentResolver.openOutputStream(destinationUri)?.use { output ->
+                    sourceFile.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                } != null
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Failed to write exported logs to $destinationUri: ${e.message}", e)
+                false
+            }
+
+            withContext(Dispatchers.Main) {
+                onComplete(success)
+            }
+        }
+    }
+
+    fun clearLogs() {
+        viewModelScope.launch(Dispatchers.IO) { com.cloudbridge.spotify.util.AppLogger.clearLogs() }
     }
     fun moveHomeSectionUp(section: HomeSection) {
         updateHomeSectionOrder { current ->
@@ -2352,10 +2691,10 @@ class SpotifyViewModel(
 
         openNowPlaying()
         viewModelScope.launch(Dispatchers.IO) {
-            val success = attemptPlaybackCommandWithWakeup {
+            val outcome = attemptPlaybackCommandWithWakeup {
                 playResolvedTrackList(tracks)
             }
-            _deviceNotFoundError.value = !success
+            val success = applyPlaybackCommandOutcome(outcome)
             if (success) {
                 delay(500)
                 syncPlaybackState()
@@ -2387,7 +2726,7 @@ class SpotifyViewModel(
             success
         } catch (e: Exception) {
             handleApiFailure(e)
-            Log.e(TAG, "Failed to start radio from $source: ${e.message}", e)
+            AppLogger.e(TAG, "Failed to start radio from $source: ${e.message}", e)
             false
         }
     }
@@ -2438,9 +2777,16 @@ class SpotifyViewModel(
         if (distinctUris.isEmpty()) return
 
         var allSucceeded = true
-        distinctUris.forEach { uri ->
-            val success = playbackController.addToQueue(uri)
-            if (!success) allSucceeded = false
+        try {
+            distinctUris.forEach { uri ->
+                val success = playbackController.addToQueue(uri)
+                if (!success) allSucceeded = false
+            }
+        } catch (e: IOException) {
+            _isOffline.value = true
+            _deviceNotFoundError.value = false
+            AppLogger.w(TAG, "Queue enqueue failed due to network drop: ${e.message}", e)
+            return
         }
 
         _deviceNotFoundError.value = !allSucceeded
@@ -2463,7 +2809,7 @@ class SpotifyViewModel(
             } while (page.next != null && offset < page.total && tracks.size < MAX_QUEUE_BATCH)
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 403) {
-                Log.w(TAG, "403 Forbidden fetching tracks for playlist $playlistId — missing playlist scope. User should Refresh Permissions.")
+                AppLogger.w(TAG, "403 Forbidden fetching tracks for playlist $playlistId — missing playlist scope. User should Refresh Permissions.")
             } else {
                 throw e
             }
@@ -2501,6 +2847,10 @@ class SpotifyViewModel(
         }
     }
 
+    private fun rethrowIfCancellation(e: Exception) {
+        if (e is CancellationException) throw e
+    }
+
     private suspend fun resolveUrisForPlayback(uris: List<String>): List<String> =
         uris.take(100).map { resolveTrackUriForPlayback(it) }
 
@@ -2523,7 +2873,7 @@ class SpotifyViewModel(
         return try {
             libraryRepository.getTrack(trackId)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to resolve track for uri $trackUri: ${e.message}")
+            AppLogger.w(TAG, "Failed to resolve track for uri $trackUri: ${e.message}")
             null
         }
     }

@@ -322,7 +322,8 @@ Some phone vendors aggressively deep-sleep Spotify when the handset is locked. I
 Cloud-Bridge now adds a two-stage recovery path:
 
 1. **Passive device memorization**: `syncPlaybackState()` inspects `GET /v1/me/player` and, when Spotify reports an active device with a non-null ID, forwards it to `DeviceManager.registerActiveDevice()` so the last known phone target remains cached.
-2. **Native Bluetooth wake-up**: if a wrapped playback command returns `false`, the ViewModel dispatches `KEYCODE_MEDIA_PLAY` (`ACTION_DOWN` + `ACTION_UP`) through Android `AudioManager`, waits 2 seconds, refreshes device discovery, and retries the command once.
+2. **Native Bluetooth wake-up**: if a wrapped playback command returns a semantic failure (`false`), the ViewModel dispatches `KEYCODE_MEDIA_PLAY` (`ACTION_DOWN` + `ACTION_UP`) through Android `AudioManager`, waits 2 seconds, refreshes device discovery, and retries the command once.
+3. **Offline short-circuit**: if a playback command fails with a transport-level `IOException` (dead zone, timeout, dropped route), the ViewModel marks the app offline and skips the AVRCP wake-up path entirely.
 
 This leverages the existing AVRCP link between the AAOS head unit and the phone to simulate a steering-wheel play press and wake the sleeping media stack locally before retrying the cloud call.
 
@@ -478,6 +479,8 @@ Provides device management and account options:
 | Section | Content |
 |---|---|
 | Playback Device | List of available Spotify Connect devices with lock/unlock. "Automatic" mode (default) lets the app discover devices dynamically. Locking pins playback to a specific device ID persisted in DataStore. |
+| Bluetooth Auto-Launch | Shows whether the ACL receiver is armed with a saved MAC address and lets the user disable it so AAOS Bluetooth reconnect and call-routing tests can run in manual mode. |
+| Logging | Toggle to enable/disable file-based logging (`AppLogger`). When enabled, all API calls, auth events, playback commands, and errors are written to internal log files. Export first uses the AAOS document picker (`ACTION_CREATE_DOCUMENT`) so logs can be saved directly to USB or another writable location; a share intent remains as a fallback on images that lack a document picker. Clear button removes all log files. |
 | Account | "Re-authenticate with Spotify" button launches `SetupActivity`. |
 
 #### Playlist / Album Detail Screen
@@ -509,6 +512,7 @@ Displays the upcoming playback queue with a grid/list toggle:
 - **List mode**: `LazyColumn` with `SwipeToDismissBox` rows.
   - Swiping reveals a red delete icon and removes the track from local state.
   - **Note**: Removal is UI-only (Spotify's API doesn't support queue removal by index).
+- **Stable Compose identity**: Raw Spotify queue items are wrapped in a local `QueueItem(uniqueId, track)` so duplicate URIs can still keep stable row keys without falling back to list indices.
 - **Now Playing card**: Prominent row at the top with 100 dp album art and green "NOW PLAYING" label.
 - **Up Next vs Queue split**: The ViewModel derives a separate **Up Next** section from the active playback context (playlist/album ordering or next unplayed podcast episodes) and leaves explicit/manual Spotify queue items in a dedicated **Spotify Queue** section.
 - **Podcast fallback**: If the active podcast has no more unplayed newer-to-older episodes after the current episode, the **Up Next** section falls back to Spotify's queue suggestions.
@@ -600,7 +604,14 @@ Spotify-owned Made For You playlists and category endpoints are not reliable for
 
 - **No push notifications**: Spotify's API is poll-only for playback state. The 3-second interval means state changes may be delayed up to 3 seconds.
 - **204 No Content**: If nothing is playing, `GET /v1/me/player` returns 204 with no body. The polling loop handles this gracefully.
-- **Offline gap**: If the car loses internet, the polling loop will fail silently and set the offline banner. The Now Playing card freezes at the last known state.
+- **Offline gap**: If the car loses internet, transport-level playback errors and metadata-poll failures set the offline banner without being flattened into false playback/device failures. The Now Playing card freezes at the last known state until connectivity returns.
+- **Cancellation-aware loaders**: Search and detail fetches rethrow `CancellationException` so cancelled Retrofit calls do not drive false empty/error UI while the replacement request is already running.
+
+### 5.5A Mobile Network Transport Policy
+
+- **Connect timeout**: Both OkHttp clients use a 10-second connect timeout to fail fast when a cellular handoff or dead route stalls the TCP handshake.
+- **Read timeout**: The read timeout remains 15 seconds so large Spotify payloads still have room to complete on weaker LTE links.
+- **Connection retry**: `retryOnConnectionFailure(true)` is enabled so OkHttp can automatically retry alternate routes during transient handoffs.
 
 ### 5.6 Rate Limiting Budget
 
@@ -612,6 +623,7 @@ Spotify's documented rate limit is approximately **180 requests per minute** per
 | User interactions | ~5–10 | Play, skip, navigate |
 | Home feed load | ~15 (burst) | Recently played + hydration + search + artist albums |
 | Library load | ~5 (burst) | Playlists + albums + shows |
+| Liked Songs detail | bounded | Caps the initial fetch instead of paging the entire saved-track library |
 | **Total (typical)** | **~30–40** | Well under the 180 limit |
 
 ---
@@ -713,7 +725,8 @@ AAOS_Spotify_Cloud_Bridge/
 │       │   │   │       ├── Theme.kt                 # Material 3 dark theme wrapper
 │       │   │   │       └── Type.kt                  # Automotive-optimised typography scale
 │       │   │   └── util/
-│       │   │       └── ApiResult.kt                 # Sealed class: Success | Error wrapper
+│       │       ├── ApiResult.kt                 # Sealed class: Success | Error wrapper
+│       │       └── AppLogger.kt                 # Centralised file logger with enable/disable and USB export
 │       │   └── res/
 │       │       ├── drawable/                        # Vector icon XMLs (11 files)
 │       │       ├── layout/
@@ -723,6 +736,7 @@ AAOS_Spotify_Cloud_Bridge/
 │       │       │   └── themes.xml                   # Legacy XML theme (for SetupActivity)
 │       │       └── xml/
 │       │           ├── automotive_app_desc.xml       # AAOS automotive app descriptor
+│       │           ├── file_paths.xml                # FileProvider paths for log export
 │       │           └── network_security_config.xml   # Network security policy
 │       └── test/
 │           └── kotlin/com/cloudbridge/spotify/
@@ -758,7 +772,7 @@ AAOS_Spotify_Cloud_Bridge/
 | `com.cloudbridge.spotify.ui.components` | Reusable Compose components (tiles, mini-player, controls) |
 | `com.cloudbridge.spotify.ui.screens` | Top-level screen composables (Home, Library, Search, Queue, Settings, ArtistDetail, PlaylistDetail, NowPlaying) |
 | `com.cloudbridge.spotify.ui.theme` | Material 3 theme, colours, and typography |
-| `com.cloudbridge.spotify.util` | Cross-cutting utilities (ApiResult) |
+| `com.cloudbridge.spotify.util` | Cross-cutting utilities (ApiResult, AppLogger) |
 
 ---
 
@@ -846,7 +860,7 @@ When a Bluetooth device connects (e.g., the user's phone pairs with the car), th
 
 #### Configuration
 
-The paired device MAC is saved by the user in Settings (stored in DataStore via `TokenManager.saveBtAutoLaunchMac()`). Pass `null` to disable the feature.
+The paired device MAC is saved by the user in Settings (stored in DataStore via `TokenManager.saveBtAutoLaunchMac()`). Pass `null` to disable the feature and return Settings to manual mode.
 
 #### Permissions
 

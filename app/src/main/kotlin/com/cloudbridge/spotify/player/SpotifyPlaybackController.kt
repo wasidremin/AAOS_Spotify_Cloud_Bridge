@@ -1,12 +1,15 @@
 package com.cloudbridge.spotify.player
 
-import android.util.Log
 import com.cloudbridge.spotify.network.SpotifyApiService
+import com.cloudbridge.spotify.util.AppLogger
 import com.cloudbridge.spotify.network.model.CurrentPlaybackResponse
 import com.cloudbridge.spotify.network.model.PlayOffset
 import com.cloudbridge.spotify.network.model.PlayRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 /**
  * Wraps Spotify Web API playback commands with error handling.
@@ -45,7 +48,7 @@ class SpotifyPlaybackController(
         withContext(Dispatchers.IO) {
             val deviceId = deviceManager.getPhoneDeviceId()
             if (deviceId == null) {
-                Log.e(TAG, "Cannot play: no device available")
+                AppLogger.e(TAG, "Cannot play: no device available")
                 return@withContext false
             }
 
@@ -146,13 +149,22 @@ class SpotifyPlaybackController(
                 if (response.code() == 429) {
                     throw retrofit2.HttpException(response)
                 }
-                Log.w(TAG, "getCurrentPlayback failed: ${response.code()}")
+                AppLogger.w(TAG, "getCurrentPlayback failed: ${response.code()}")
                 null
             }
         } catch (e: retrofit2.HttpException) {
             throw e // Propagate the 429 to the ViewModel
+        } catch (e: UnknownHostException) {
+            AppLogger.w(TAG, "getCurrentPlayback offline: ${e.message}", e)
+            throw e
+        } catch (e: SocketTimeoutException) {
+            AppLogger.e(TAG, "getCurrentPlayback timeout: ${e.message}", e)
+            throw e
+        } catch (e: IOException) {
+            AppLogger.e(TAG, "getCurrentPlayback I/O error: ${e.message}", e)
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "getCurrentPlayback error: ${e.message}", e)
+            AppLogger.e(TAG, "getCurrentPlayback error: ${e.message}", e)
             null
         }
     }
@@ -165,10 +177,10 @@ class SpotifyPlaybackController(
             val deviceId = deviceManager.getPhoneDeviceId()
             val response = api.setShuffle(state = state, deviceId = deviceId)
             val success = response.code() in listOf(200, 202, 204)
-            Log.d(TAG, "setShuffle($state): ${response.code()} (success=$success)")
+            AppLogger.d(TAG, "setShuffle($state): ${response.code()} (success=$success)")
             success
         } catch (e: Exception) {
-            Log.e(TAG, "setShuffle failed: ${e.message}", e)
+            AppLogger.e(TAG, "setShuffle failed: ${e.message}", e)
             false
         }
     }
@@ -181,10 +193,10 @@ class SpotifyPlaybackController(
             val deviceId = deviceManager.getPhoneDeviceId()
             val response = api.setRepeat(state = state, deviceId = deviceId)
             val success = response.code() in listOf(200, 202, 204)
-            Log.d(TAG, "setRepeat($state): ${response.code()} (success=$success)")
+            AppLogger.d(TAG, "setRepeat($state): ${response.code()} (success=$success)")
             success
         } catch (e: Exception) {
-            Log.e(TAG, "setRepeat failed: ${e.message}", e)
+            AppLogger.e(TAG, "setRepeat failed: ${e.message}", e)
             false
         }
     }
@@ -197,10 +209,10 @@ class SpotifyPlaybackController(
             val deviceId = deviceManager.getPhoneDeviceId()
             val response = api.seek(positionMs = positionMs, deviceId = deviceId)
             val success = response.code() in listOf(200, 202, 204)
-            Log.d(TAG, "seek($positionMs): ${response.code()} (success=$success)")
+            AppLogger.d(TAG, "seek($positionMs): ${response.code()} (success=$success)")
             success
         } catch (e: Exception) {
-            Log.e(TAG, "seek failed: ${e.message}", e)
+            AppLogger.e(TAG, "seek failed: ${e.message}", e)
             false
         }
     }
@@ -235,39 +247,51 @@ class SpotifyPlaybackController(
         // last active device automatically (avoids silent no-op when device list
         // is temporarily empty, e.g. on the emulator or after a BT reconnect).
         val deviceId = deviceManager.getPhoneDeviceId()
-        if (deviceId == null) Log.w(TAG, "$commandName: no phone device found, letting Spotify choose")
+        if (deviceId == null) AppLogger.w(TAG, "$commandName: no phone device found, letting Spotify choose")
 
         try {
             val response = command(deviceId)
 
             when (response.code()) {
                 200, 202, 204 -> {
-                    Log.d(TAG, "$commandName: success (${response.code()})")
+                    AppLogger.d(TAG, "$commandName: success (${response.code()})")
                     return true
                 }
                 404 -> {
                     // Device might have gone away. Refresh and retry once.
-                    Log.w(TAG, "$commandName: 404 Device not found. Refreshing device list...")
+                    AppLogger.w(TAG, "$commandName: 404 Device not found. Refreshing device list...")
                     val newDeviceId = deviceManager.refreshDeviceId()
                     if (newDeviceId != null && newDeviceId != deviceId) {
                         val retryResponse = command(newDeviceId)
                         val success = retryResponse.code() in listOf(200, 202, 204)
-                        Log.d(TAG, "$commandName retry: ${retryResponse.code()} (success=$success)")
+                        AppLogger.d(TAG, "$commandName retry: ${retryResponse.code()} (success=$success)")
                         return success
                     }
+
+                    if (deviceId != null) {
+                        AppLogger.w(TAG, "$commandName: retrying without device_id so Spotify can target the active session")
+                        val fallbackResponse = command(null)
+                        val success = fallbackResponse.code() in listOf(200, 202, 204)
+                        AppLogger.d(TAG, "$commandName active-session retry: ${fallbackResponse.code()} (success=$success)")
+                        return success
+                    }
+
                     return false
                 }
                 403 -> {
-                    Log.e(TAG, "$commandName: 403 Forbidden. Device may be restricted or user lacks Premium.")
+                    AppLogger.e(TAG, "$commandName: 403 Forbidden. Device may be restricted or user lacks Premium.")
                     return false
                 }
                 else -> {
-                    Log.e(TAG, "$commandName: unexpected response ${response.code()}")
+                    AppLogger.e(TAG, "$commandName: unexpected response ${response.code()}")
                     return false
                 }
             }
+        } catch (e: IOException) {
+            AppLogger.e(TAG, "$commandName network failure: ${e.message}", e)
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "$commandName failed: ${e.message}", e)
+            AppLogger.e(TAG, "$commandName failed: ${e.message}", e)
             return false
         }
     }

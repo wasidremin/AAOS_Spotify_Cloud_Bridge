@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import com.cloudbridge.spotify.R
 import com.cloudbridge.spotify.SpotifyCloudBridgeApp
 import com.cloudbridge.spotify.databinding.ActivitySetupBinding
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -28,6 +29,10 @@ import kotlinx.coroutines.launch
  */
 class SetupActivity : AppCompatActivity() {
 
+    companion object {
+        private const val TAG = "SetupActivity"
+    }
+
     private lateinit var binding: ActivitySetupBinding
     private lateinit var tokenManager: TokenManager
 
@@ -45,6 +50,7 @@ class SetupActivity : AppCompatActivity() {
         val extraClientSecret = intent.getStringExtra("client_secret")
         val extraRefreshToken = intent.getStringExtra("refresh_token")
         if (!extraClientId.isNullOrBlank() && !extraRefreshToken.isNullOrBlank()) {
+            AppLogger.i(TAG, "Credentials injected via Intent extras")
             lifecycleScope.launch {
                 tokenManager.saveCredentials(extraClientId, extraRefreshToken, extraClientSecret)
                 Toast.makeText(
@@ -91,6 +97,7 @@ class SetupActivity : AppCompatActivity() {
 
             lifecycleScope.launch {
                 tokenManager.saveCredentials(clientId, refreshToken)
+                AppLogger.i(TAG, "Credentials saved manually")
                 Toast.makeText(this@SetupActivity, R.string.toast_saved, Toast.LENGTH_SHORT).show()
                 updateStatus("✓ Credentials saved")
                 // Return to AAOS — the system will re-read the MediaLibraryService
@@ -101,6 +108,7 @@ class SetupActivity : AppCompatActivity() {
         binding.btnClear.setOnClickListener {
             lifecycleScope.launch {
                 tokenManager.clearAll()
+                AppLogger.i(TAG, "All credentials cleared")
                 binding.editClientId.setText("")
                 binding.editRefreshToken.setText("")
                 Toast.makeText(this@SetupActivity, R.string.toast_cleared, Toast.LENGTH_SHORT).show()
