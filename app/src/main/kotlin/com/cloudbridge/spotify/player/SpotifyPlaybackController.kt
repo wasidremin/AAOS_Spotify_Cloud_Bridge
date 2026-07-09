@@ -1,10 +1,11 @@
 package com.cloudbridge.spotify.player
 
 import com.cloudbridge.spotify.network.SpotifyApiService
-import com.cloudbridge.spotify.util.AppLogger
 import com.cloudbridge.spotify.network.model.CurrentPlaybackResponse
 import com.cloudbridge.spotify.network.model.PlayOffset
 import com.cloudbridge.spotify.network.model.PlayRequest
+import com.cloudbridge.spotify.network.model.TransferPlaybackRequest
+import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -12,133 +13,100 @@ import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
 /**
- * Wraps Spotify Web API playback commands with error handling.
+ * Thin Spotify Web API playback command wrapper.
  *
- * This is the "bridge" in Cloud-Bridge: instead of feeding audio data
- * to a local decoder, we fire HTTP requests to Spotify's servers
- * to control playback on the user's phone.
+ * Device resolution and session recovery live in [PlaybackSessionManager].
+ * This class only issues HTTP commands against an already-chosen device_id
+ * (or null to let Spotify pick the active session).
  *
- * Error handling strategy:
- * - 204: Success (Spotify returns 204 No Content for control commands)
- * - 401: Handled by TokenRefreshAuthenticator (transparent retry)
- * - 403: Device is restricted or user lacks Premium
- * - 404: Device not found → refresh device list and retry once
- * - 429: Handled by RateLimitRetryInterceptor (transparent retry)
+ * On HTTP 404, retries once with `device_id=null` so a stale id from a
+ * Connect blind spot does not hard-fail. It does **not** re-discover devices.
+ *
+ * Returns [PlaybackCommandResult] so the session manager can treat 403
+ * Forbidden differently from 404 / asleep (no AVRCP on forbidden).
  */
 class SpotifyPlaybackController(
-    private val api: SpotifyApiService,
-    private val deviceManager: DeviceManager
+    private val api: SpotifyApiService
 ) {
     companion object {
         private const val TAG = "PlaybackController"
     }
 
-    /**
-     * Start playback of a specific track within a playlist context.
-     *
-     * Using context_uri + offset gives a better UX than playing a single
-     * track URI because Spotify will continue playing the next tracks
-     * in the playlist automatically.
-     *
-     * @param trackUri e.g., "spotify:track:6rqhFgbbKwnb9MLmUQDhG6"
-     * @param contextUri e.g., "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M" (optional)
-     * @return true if the command was accepted by Spotify
-     */
-    suspend fun play(trackUri: String? = null, contextUri: String? = null, offsetPosition: Int? = null, uris: List<String>? = null): Boolean =
-        withContext(Dispatchers.IO) {
-            val deviceId = deviceManager.getPhoneDeviceId()
-            if (deviceId == null) {
-                AppLogger.e(TAG, "Cannot play: no device available")
-                return@withContext false
-            }
+    suspend fun play(
+        deviceId: String?,
+        trackUri: String? = null,
+        contextUri: String? = null,
+        offsetPosition: Int? = null,
+        uris: List<String>? = null
+    ): PlaybackCommandResult = withContext(Dispatchers.IO) {
+        val body = buildPlayRequest(trackUri, contextUri, offsetPosition, uris)
+        execute("play", deviceId) { id -> api.play(deviceId = id, body = body) }
+    }
 
-            val body = when {
-                // 1. Play URI list (for Liked Songs queue)
-                uris != null && uris.isNotEmpty() -> {
-                    PlayRequest(uris = uris)
-                }
-                // 2. Liked Songs workaround (Spotify API rejects "collection" as a context_uri)
-                contextUri == "spotify:user:me:collection" && trackUri != null -> {
-                    PlayRequest(uris = listOf(trackUri))
-                }
-                // 3. Play a specific track in a playlist by its index position
-                contextUri != null && offsetPosition != null -> {
-                    PlayRequest(contextUri = contextUri, offset = PlayOffset(position = offsetPosition))
-                }
-                // 4. Play a specific track in a playlist by its URI
-                contextUri != null && trackUri != null -> {
-                    PlayRequest(contextUri = contextUri, offset = PlayOffset(uri = trackUri))
-                }
-                // 5. "Play All" a playlist or album from the beginning
-                contextUri != null -> {
-                    PlayRequest(contextUri = contextUri)
-                }
-                // 6. Play a single standalone track (Queue)
-                trackUri != null -> {
-                    PlayRequest(uris = listOf(trackUri))
-                }
-                // 7. Resume current playback
-                else -> null
-            }
+    suspend fun pause(deviceId: String?): PlaybackCommandResult = withContext(Dispatchers.IO) {
+        execute("pause", deviceId) { api.pause(deviceId = it) }
+    }
 
-            return@withContext executeWithRetry("play") {
-                api.play(deviceId = it, body = body)
-            }
-        }
+    suspend fun next(deviceId: String?): PlaybackCommandResult = withContext(Dispatchers.IO) {
+        execute("next", deviceId) { api.next(deviceId = it) }
+    }
 
-    /**
-     * Resume playback on the phone (no track specified).
-     */
-    suspend fun resume(): Boolean = withContext(Dispatchers.IO) {
-        return@withContext executeWithRetry("resume") {
-            api.play(deviceId = it, body = null)
-        }
+    suspend fun previous(deviceId: String?): PlaybackCommandResult = withContext(Dispatchers.IO) {
+        execute("previous", deviceId) { api.previous(deviceId = it) }
+    }
+
+    suspend fun resume(deviceId: String?): PlaybackCommandResult = withContext(Dispatchers.IO) {
+        // Empty body resumes current context; Retrofit rejects a literal null @Body.
+        execute("resume", deviceId) { api.play(deviceId = it, body = PlayRequest()) }
     }
 
     /**
-     * Aggressively resumes playback by transferring the session to the phone
-     * and forcing it to play its local queue (bypassing cloud session checks).
+     * Transfer playback to [deviceId] and force play (or resume without id).
      */
-    suspend fun forceResume(): Boolean = withContext(Dispatchers.IO) {
-        return@withContext executeWithRetry("forceResume") { deviceId ->
-            if (deviceId != null) {
+    suspend fun forceResume(deviceId: String?): PlaybackCommandResult = withContext(Dispatchers.IO) {
+        execute("forceResume", deviceId) { id ->
+            if (id != null) {
                 api.transferPlayback(
-                    com.cloudbridge.spotify.network.model.TransferPlaybackRequest(
-                        deviceIds = listOf(deviceId),
-                        play = true
-                    )
+                    TransferPlaybackRequest(deviceIds = listOf(id), play = true)
                 )
             } else {
-                // Fallback if no device ID is somehow found
-                api.play(deviceId = null, body = null)
+                // 404 fallback path — resume active session without a device id.
+                api.play(deviceId = null, body = PlayRequest())
             }
         }
     }
 
-    suspend fun pause(): Boolean = withContext(Dispatchers.IO) {
-        return@withContext executeWithRetry("pause") {
-            api.pause(deviceId = it)
+    suspend fun addToQueue(deviceId: String?, uri: String): PlaybackCommandResult =
+        withContext(Dispatchers.IO) {
+            execute("addToQueue", deviceId) {
+                api.addToQueue(uri = uri, deviceId = it)
+            }
         }
-    }
 
-    suspend fun next(): Boolean = withContext(Dispatchers.IO) {
-        return@withContext executeWithRetry("next") {
-            api.next(deviceId = it)
+    suspend fun setShuffle(deviceId: String?, state: Boolean): PlaybackCommandResult =
+        withContext(Dispatchers.IO) {
+            execute("setShuffle", deviceId) {
+                api.setShuffle(state = state, deviceId = it)
+            }
         }
-    }
 
-    suspend fun previous(): Boolean = withContext(Dispatchers.IO) {
-        return@withContext executeWithRetry("previous") {
-            api.previous(deviceId = it)
+    suspend fun setRepeat(deviceId: String?, state: String): PlaybackCommandResult =
+        withContext(Dispatchers.IO) {
+            execute("setRepeat", deviceId) {
+                api.setRepeat(state = state, deviceId = it)
+            }
         }
-    }
+
+    suspend fun seek(deviceId: String?, positionMs: Long): PlaybackCommandResult =
+        withContext(Dispatchers.IO) {
+            execute("seek", deviceId) {
+                api.seek(positionMs = positionMs, deviceId = it)
+            }
+        }
 
     /**
-     * Get the current playback state from Spotify.
-     * Used for metadata sync (updating the car screen's now-playing card).
-     *
-     * Returns null if nothing is currently playing (HTTP 204).
-     * Throws HttpException for 429 rate limit errors so ViewModel can handle backoff.
+     * Current playback state for metadata sync.
+     * Returns null on HTTP 204. Throws for 429 and transport failures.
      */
     suspend fun getCurrentPlayback(): CurrentPlaybackResponse? = withContext(Dispatchers.IO) {
         try {
@@ -153,7 +121,7 @@ class SpotifyPlaybackController(
                 null
             }
         } catch (e: retrofit2.HttpException) {
-            throw e // Propagate the 429 to the ViewModel
+            throw e
         } catch (e: UnknownHostException) {
             AppLogger.w(TAG, "getCurrentPlayback offline: ${e.message}", e)
             throw e
@@ -169,122 +137,83 @@ class SpotifyPlaybackController(
         }
     }
 
-    /**
-     * Toggle shuffle mode on/off.
-     */
-    suspend fun setShuffle(state: Boolean): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val deviceId = deviceManager.getPhoneDeviceId()
-            val response = api.setShuffle(state = state, deviceId = deviceId)
-            val success = response.code() in listOf(200, 202, 204)
-            AppLogger.d(TAG, "setShuffle($state): ${response.code()} (success=$success)")
-            success
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "setShuffle failed: ${e.message}", e)
-            false
-        }
+    internal fun buildPlayRequest(
+        trackUri: String?,
+        contextUri: String?,
+        offsetPosition: Int?,
+        uris: List<String>?
+    ): PlayRequest = when {
+        uris != null && uris.isNotEmpty() -> PlayRequest(uris = uris)
+        // Liked Songs workaround — API rejects collection as context_uri
+        contextUri == "spotify:user:me:collection" && trackUri != null ->
+            PlayRequest(uris = listOf(trackUri))
+        contextUri != null && offsetPosition != null ->
+            PlayRequest(contextUri = contextUri, offset = PlayOffset(position = offsetPosition))
+        contextUri != null && trackUri != null ->
+            PlayRequest(contextUri = contextUri, offset = PlayOffset(uri = trackUri))
+        contextUri != null -> PlayRequest(contextUri = contextUri)
+        trackUri != null -> PlayRequest(uris = listOf(trackUri))
+        // Empty object resumes the active session (Retrofit cannot send a null @Body).
+        else -> PlayRequest()
     }
 
     /**
-     * Set repeat mode: "track", "context", or "off".
+     * Execute against [deviceId]. On 404, one retry with null so Spotify can
+     * target the active session (stale id recovery only — no rediscovery).
      */
-    suspend fun setRepeat(state: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val deviceId = deviceManager.getPhoneDeviceId()
-            val response = api.setRepeat(state = state, deviceId = deviceId)
-            val success = response.code() in listOf(200, 202, 204)
-            AppLogger.d(TAG, "setRepeat($state): ${response.code()} (success=$success)")
-            success
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "setRepeat failed: ${e.message}", e)
-            false
-        }
-    }
-
-    /**
-     * Seek to a position in the current track.
-     */
-    suspend fun seek(positionMs: Long): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val deviceId = deviceManager.getPhoneDeviceId()
-            val response = api.seek(positionMs = positionMs, deviceId = deviceId)
-            val success = response.code() in listOf(200, 202, 204)
-            AppLogger.d(TAG, "seek($positionMs): ${response.code()} (success=$success)")
-            success
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "seek failed: ${e.message}", e)
-            false
-        }
-    }
-
-    suspend fun addToQueue(uri: String): Boolean = withContext(Dispatchers.IO) {
-        return@withContext executeWithRetry("addToQueue") {
-            api.addToQueue(uri = uri, deviceId = it)
-        }
-    }
-
-    // ── Private Helpers ──────────────────────────────────────────────
-
-    /**
-     * Execute a playback command with **one automatic retry on HTTP 404**.
-     *
-     * Retry logic:
-     * 1. Sends the command with the currently cached device ID.
-     * 2. If the response is 404 ("Device not found"), calls
-     *    [DeviceManager.refreshDeviceId] to discover a new device.
-     * 3. If a different device ID is returned, retries the command once.
-     * 4. Any other response code is returned as-is.
-     *
-     * @param commandName Human-readable label for log messages.
-     * @param command     Lambda that takes a device ID and returns a Retrofit [Response].
-     * @return `true` if the command succeeded (HTTP 200/202/204), `false` otherwise.
-     */
-    private suspend fun executeWithRetry(
+    private suspend fun execute(
         commandName: String,
+        deviceId: String?,
         command: suspend (deviceId: String?) -> retrofit2.Response<Unit>
-    ): Boolean {
-        // Prefer the user's phone; fall back to null so Spotify routes to the
-        // last active device automatically (avoids silent no-op when device list
-        // is temporarily empty, e.g. on the emulator or after a BT reconnect).
-        val deviceId = deviceManager.getPhoneDeviceId()
-        if (deviceId == null) AppLogger.w(TAG, "$commandName: no phone device found, letting Spotify choose")
+    ): PlaybackCommandResult {
+        if (deviceId == null) {
+            AppLogger.w(TAG, "$commandName: no device id, letting Spotify choose active session")
+        }
 
         try {
             val response = command(deviceId)
-
             when (response.code()) {
                 200, 202, 204 -> {
                     AppLogger.d(TAG, "$commandName: success (${response.code()})")
-                    return true
+                    return PlaybackCommandResult.Success
                 }
                 404 -> {
-                    // Device might have gone away. Refresh and retry once.
-                    AppLogger.w(TAG, "$commandName: 404 Device not found. Refreshing device list...")
-                    val newDeviceId = deviceManager.refreshDeviceId()
-                    if (newDeviceId != null && newDeviceId != deviceId) {
-                        val retryResponse = command(newDeviceId)
-                        val success = retryResponse.code() in listOf(200, 202, 204)
-                        AppLogger.d(TAG, "$commandName retry: ${retryResponse.code()} (success=$success)")
-                        return success
-                    }
-
                     if (deviceId != null) {
-                        AppLogger.w(TAG, "$commandName: retrying without device_id so Spotify can target the active session")
-                        val fallbackResponse = command(null)
-                        val success = fallbackResponse.code() in listOf(200, 202, 204)
-                        AppLogger.d(TAG, "$commandName active-session retry: ${fallbackResponse.code()} (success=$success)")
-                        return success
+                        AppLogger.w(
+                            TAG,
+                            "$commandName: 404 Device not found; retrying without device_id"
+                        )
+                        val fallback = command(null)
+                        return if (fallback.code() in listOf(200, 202, 204)) {
+                            AppLogger.d(
+                                TAG,
+                                "$commandName active-session retry: ${fallback.code()} (success=true)"
+                            )
+                            PlaybackCommandResult.Success
+                        } else {
+                            AppLogger.d(
+                                TAG,
+                                "$commandName active-session retry: ${fallback.code()} (success=false)"
+                            )
+                            when (fallback.code()) {
+                                403 -> PlaybackCommandResult.forbidden(403)
+                                404 -> PlaybackCommandResult.notFound(404)
+                                else -> PlaybackCommandResult.other(fallback.code())
+                            }
+                        }
                     }
-
-                    return false
+                    return PlaybackCommandResult.notFound(404)
                 }
                 403 -> {
-                    AppLogger.e(TAG, "$commandName: 403 Forbidden. Device may be restricted or user lacks Premium.")
-                    return false
+                    AppLogger.e(
+                        TAG,
+                        "$commandName: 403 Forbidden. Device may be restricted or user lacks Premium."
+                    )
+                    return PlaybackCommandResult.forbidden(403)
                 }
                 else -> {
                     AppLogger.e(TAG, "$commandName: unexpected response ${response.code()}")
-                    return false
+                    return PlaybackCommandResult.other(response.code())
                 }
             }
         } catch (e: IOException) {
@@ -292,7 +221,7 @@ class SpotifyPlaybackController(
             throw e
         } catch (e: Exception) {
             AppLogger.e(TAG, "$commandName failed: ${e.message}", e)
-            return false
+            return PlaybackCommandResult.other()
         }
     }
 }

@@ -1,6 +1,6 @@
 # Architecture — Cloud-Bridge
 
-> **Version 2.8.0** — Independent educational AAOS template built on the Spotify Web API.
+> **Version 2.9.0** — Independent educational AAOS template built on the Spotify Web API.
 
 ## 1. High-Level Overview
 
@@ -26,7 +26,8 @@
 │                           │                                  │
 │     SpotifyLibraryRepository + CustomMixEngine               │
 │                           │                                  │
-│         SpotifyPlaybackController + DeviceManager            │
+│   PlaybackSessionManager + SpotifyPlaybackController         │
+│              DeviceManager (cache / discovery)               │
 │                           │                                  │
 │              Retrofit + OkHttp (AuthInterceptor)             │
 │                           │                                  │
@@ -90,13 +91,24 @@ com.cloudbridge.spotify
 │   ├── SpotifyApiService.kt            # Retrofit — api.spotify.com (+ queue/save endpoints)
 │   └── RetrofitProvider.kt             # Dual Retrofit instances + retry
 ├── player/
-│   ├── DeviceManager.kt                # Device discovery with priority
-│   └── SpotifyPlaybackController.kt     # Playback command wrapper + retry
+│   ├── ConnectionState.kt              # ConnectionState + PlaybackTarget + CommandResult
+│   ├── PlaybackSessionManager.kt       # Connect session + establishSession wake ladder
+│   ├── DeviceWakeCoordinator.kt        # Ordered wake steps (transfer / soft / AVRCP / optional webhook)
+│   ├── LastKnownDevice.kt              # Durable last Connect phone identity
+│   ├── BluetoothMediaLink.kt           # A2DP/HEADSET connected? (gates AVRCP)
+│   ├── AvrcpRecoveryStrategy.kt        # AVRCP MEDIA_PLAY only when BT media linked
+│   ├── HttpCompanionWake.kt            # Optional advanced webhook (off by default)
+│   ├── DeviceManager.kt                # Short-term device cache
+│   └── SpotifyPlaybackController.kt    # HTTP control commands + typed failures
 ├── ui/
 │   ├── MainActivity.kt                 # Compose entry point (distractionOptimized)
 │   ├── AddProfileViewModel.kt          # QR onboarding session/polling state
-│   ├── SpotifyViewModel.kt             # UI state, navigation, and orchestration only
-│   │                                  # delegates paging and mix generation to data/domain layers
+│   ├── SpotifyViewModel.kt             # UI state, navigation, and orchestration
+│   ├── UiModels.kt                     # RecentContextItem, SearchResultItem, QueueItem, etc.
+│   ├── coordinator/
+│   │   ├── LibraryCatalogCoordinator.kt  # Playlists/albums/shows/audiobooks catalog loads
+│   │   ├── PinController.kt              # Pinned-favorites CRUD
+│   │   └── SearchCoordinator.kt          # Debounced search
 │   ├── theme/
 │   │   ├── Color.kt                    # Green-accent dark palette
 │   │   ├── Type.kt                     # Automotive-optimized typography
@@ -104,7 +116,8 @@ com.cloudbridge.spotify
 │   ├── screens/
 │   │   ├── AddProfileScreen.kt         # Smart-TV-style QR onboarding screen
 │   │   ├── HomeScreen.kt               # LazyVerticalGrid with album art tiles + podcast freshness badges
-│   │   ├── LibraryScreen.kt            # Playlists/Albums/Artists/Podcasts/Audiobooks tabs with grid/list + pinning
+│   │   ├── LibraryScreen.kt            # Tab host; content under screens/library/
+│   │   ├── library/                    # Per-tab library composables + shared toolbar/row
 │   │   ├── ManagePinsScreen.kt         # Pinned favorites reordering UI
 │   │   ├── PlaylistDetailScreen.kt     # Track list with Play All button
 │   │   ├── NowPlayingScreen.kt         # Blurred bg + hero art + controls
@@ -163,7 +176,7 @@ Primary `StateFlow`s exposed to Compose:
 | `savedShows` | `GET /v1/me/shows` (paginated) | Library tab + Home podcast cards |
 | `savedAudiobooks` | `GET /v1/me/audiobooks` (paginated) | Library audiobook tab |
 | `playbackState` | `GET /v1/me/player` (3s poll) | Now Playing + MiniPlayer |
-| `isOffline` | Metadata sync exception handling | Offline banner state |
+| `connectionState` | `PlaybackSessionManager` | Single source of session health for offline / degraded banners |
 | `requiresReauth` | API 401/403 detection | Reconnect banner state |
 | `isTrackSaved` | `GET /v1/me/library/contains` | Heart button state |
 | `queue` | `GET /v1/me/player/queue` | Queue screen |
@@ -187,7 +200,7 @@ pages load in the background.
 **Metadata sync loop**: Polls `GET /v1/me/player` every 3 seconds (2 seconds for spoken-word playback) to keep
 the Now Playing UI in sync (moved from the deleted CloudBridgePlayer).
 Network exceptions (`UnknownHostException`, `SocketTimeoutException`) toggle
-`isOffline`, which drives a top-of-screen reconnect banner.
+`connectionState` (`Offline` / `Degraded` / `Ready`), which drives top-of-screen session banners.
 HTTP 401/403 errors from content endpoints set `requiresReauth`, which shows a
 user-facing banner with a direct link to Setup. Search and detail loaders now rethrow `CancellationException` before applying failure UI so rapid typing and screen changes do not flash empty-state content from cancelled requests.
 
@@ -235,7 +248,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 
 **High-volume request audit**: The worst offenders were (1) metadata polling plus saved-track checks, (2) Home playlist suggestion loading forcing a full playlist refresh, and (3) recently played context hydration fanning out into per-item playlist/album fetches. The current architecture now caches or reuses in-memory results for those flows first. Saved-track status is no longer force-refreshed on every Now Playing poll, the Liked Songs detail loader now caps its fetch to a bounded slice, and Queue's podcast-aware **Up Next** derivation caches the active show's fetched episode slice for the current playback session while Queue refreshes are throttled, so spoken-word playback no longer layers `GET /v1/me/player/queue` plus `GET /v1/shows/{id}/episodes` on every 2-second metadata tick.
 
-### 3.3 Automotive UI Scaling
+### 3.9 Automotive UI Scaling
 
 - **Home grid**: `GridCells.Fixed(4)` for stable tile math in constrained OEM app windows.
 - **Jump Back In hydration**: recently played track contexts are resolved into canonical playlist/album cards.
@@ -247,7 +260,7 @@ to `GET /v1/me/tracks`, while reusing the existing `PlaylistDetailScreen`.
 - **Library tabs**: playlists/albums/artists/podcasts/audiobooks can switch between 4-column grids and large list rows while preserving long-press pinning, and all Library tabs expose local sort/filter controls above the content.
 - **Insets**: Screen lists/grids consume `Scaffold` `innerPadding` to keep content above MiniPlayer.
 
-### 3.4 OEM Window Constraints
+### 3.10 OEM Window Constraints
 
 On some AAOS OEM builds (for example GM), media apps run in a bounded content
 region while the right side of the panel is reserved for system widgets. A
@@ -288,17 +301,61 @@ Two Retrofit instances share a Moshi JSON parser (with KSP codegen):
 A `RateLimitRetryInterceptor` handles HTTP 429 responses, respecting the
 `Retry-After` header (max 3 retries, max 10s wait).
 
-### 3.7 DeviceManager
+### 3.7 PlaybackSessionManager (Connect session owner)
 
-Discovers the user's Spotify Connect devices and picks the best target:
+Single owner of Spotify Connect connectivity. Exposes `StateFlow<ConnectionState>`:
 
-1. Active smartphone (highest priority)
+| State | Meaning |
+|-------|---------|
+| `Disconnected` | No session yet / cleared on profile switch |
+| `Discovering` | Reconnect pipeline in flight |
+| `Ready(device)` | Commands may target this device_id (`verified` flag) |
+| `Degraded(reason)` | Network OK but not command-ready (NoDevices, Restricted, …) |
+| `Offline(reason)` | NoNetwork / SpotifyUnreachable / RateLimited / AuthExpired |
+
+**PlaybackTarget** (Settings): `Auto` | `Phone` | `CarPlayer` | `Specific(id)`.
+Re-resolved to a live device_id on each reconnect — not stored as a permanent ID alone
+for Auto/Phone/Car modes.
+
+**Reconnect pipeline** (idempotent, single-flight, cooldown): discover → select per
+target → transfer if needed → verify `GET /me/player` → Ready.
+Triggered by profile activation, `onResume`, ACL_CONNECTED (2s settle), health loop,
+and command failure recovery.
+
+**Command gate**: ViewModel calls `sessionManager.executeCommand { deviceId -> … }`.
+Returns typed `PlaybackCommandResult` (`Success`, `Forbidden`, `NotFound`, `Other`,
+`Offline`, `NoSession`) so UI banners and wake policy stay consistent.
+
+**Establish / wake ladder** (`establishSession`, also used after ACL reconnect):
+
+1. Discover Connect devices (`GET /v1/me/player/devices`)
+2. Remembered transfer — blind transfer to durable last-known phone id
+3. Soft resume — play with no `device_id` (revive last cloud session if any)
+4. Bluetooth AVRCP — `KEYCODE_MEDIA_PLAY` only when A2DP/HEADSET is connected
+5. Optional webhook — only if Settings advanced URL is configured
+6. Burst rediscover after each successful wake step
+
+AVRCP is skipped when there is no media Bluetooth link (typical emulator) or when
+the session is already Ready with a verified device. Never run AVRCP on transport
+`IOException` (TC-12D). Optional Home Assistant / companion webhook is power-user
+only — see [PHONE_WAKE.md](PHONE_WAKE.md).
+
+See [CONNECTIVITY_AUDIT.md](CONNECTIVITY_AUDIT.md) for failure-mode analysis.
+
+### 3.8 DeviceManager
+
+Low-level device_id cache used by the session manager and playback controller:
+
+1. Active smartphone (highest priority in Auto helpers)
 2. Any smartphone
-3. Any active device
-4. `null` (triggers error)
+3. Any active unrestricted device
+4. Remembered device across short `/devices` blind spots
+5. `null`
 
-Cache TTL: 2 minutes. The `SpotifyPlaybackController` calls `refreshDeviceId()`
-on 404 errors to recover from stale device IDs.
+Cache TTL: 2 minutes. Cache writes use a dedicated lock (no tryLock races).
+`SpotifyPlaybackController` still refreshes on 404; `play()` no longer early-returns
+when discovery is empty — it falls through to `device_id=null` so Spotify can target
+the active session.
 
 ## 4. Data Flow — Play Request
 
@@ -307,17 +364,16 @@ on 404 errors to recover from stale device IDs.
    │
 2. HomeScreen → viewModel.playTrack(trackUri, contextUri)
    │
-3. SpotifyViewModel launches coroutine:
-   │  ├─ SpotifyPlaybackController.play(trackUri, contextUri)
-   │  │   ├─ DeviceManager.getPhoneDeviceId() → "device_123"
-   │  │   └─ SpotifyApiService.play(deviceId, body)
-   │  │       ├─ AuthInterceptor adds Bearer header
-   │  │       └─ On 401 → TokenRefreshAuthenticator refreshes token
-   │  │
-   │  └─ On success → syncPlaybackState() → update StateFlows
+3. SpotifyViewModel → PlaybackSessionManager.executeCommand:
+   │  ├─ If not Ready → establishSession() wake ladder (discover / last-known /
+   │  │                 soft resume / BT-gated AVRCP / optional webhook)
+   │  ├─ SpotifyPlaybackController.play(deviceId, trackUri, contextUri)
+   │  │   └─ SpotifyApiService.play → AuthInterceptor / TokenRefreshAuthenticator
+   │  └─ Typed PlaybackCommandResult drives banners + optional recovery
    │
-4. Audio plays on phone → Bluetooth A2DP → car speakers
-5. MiniPlayer + NowPlayingScreen observe playbackState StateFlow
+4. On success → syncPlaybackState() updates StateFlows
+5. Audio plays on phone → Bluetooth A2DP → car speakers
+6. MiniPlayer + NowPlayingScreen observe playbackState StateFlow
 ```
 
 ## 5. Threading Model

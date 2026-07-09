@@ -10,31 +10,17 @@ import com.cloudbridge.spotify.ui.MainActivity
 import kotlinx.coroutines.launch
 
 /**
- * Bluetooth Auto-Launch Receiver.
+ * Bluetooth ACL receiver.
  *
- * Listens for [BluetoothDevice.ACTION_ACL_CONNECTED] broadcasts.
- * If the connecting device's MAC address matches the one saved in
- * [com.cloudbridge.spotify.auth.TokenManager] (set by the user in
- * Settings), this receiver brings [MainActivity] to the foreground —
- * giving a Car OS "open music app when phone connects" experience.
- *
- * ## No-match behaviour
- * If no MAC is configured (feature disabled), or the address doesn't
- * match, the broadcast is silently ignored.
+ * On every [BluetoothDevice.ACTION_ACL_CONNECTED]:
+ * 1. Triggers [PlaybackSessionManager.onBluetoothConnected] so Connect
+ *    session recovery runs after a short settle delay (independent of UI).
+ * 2. If a MAC is saved in Settings and matches, brings [MainActivity]
+ *    to the foreground (auto-launch).
  *
  * ## Permissions required (see AndroidManifest.xml)
  * - `android.permission.BLUETOOTH` (API ≤ 30)
  * - `android.permission.BLUETOOTH_CONNECT` (API ≥ 31)
- *
- * ## Manifest registration
- * ```xml
- * <receiver android:name=".receiver.BluetoothAutoLaunchReceiver"
- *           android:exported="true">
- *     <intent-filter>
- *         <action android:name="android.bluetooth.device.action.ACL_CONNECTED"/>
- *     </intent-filter>
- * </receiver>
- * ```
  */
 class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
 
@@ -50,15 +36,16 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
             return
         }
 
-        // Use the application-level scope — goAsync() would work too but
-        // the DataStore read is fast and we already have a scope available.
         val pendingResult = goAsync()
         app.applicationScope.launch {
             try {
-                val savedMac = app.tokenManager.getBtAutoLaunchMac()
+                // Always recover the Connect session after BT ACL (settled inside manager).
+                AppLogger.i(TAG, "ACL_CONNECTED — scheduling playback session reconnect")
+                app.playbackSessionManager.onBluetoothConnected()
 
+                val savedMac = app.tokenManager.getBtAutoLaunchMac()
                 if (savedMac.isNullOrBlank()) {
-                    AppLogger.d(TAG, "BT auto-launch: no MAC configured, ignoring connection event")
+                    AppLogger.d(TAG, "BT auto-launch: no MAC configured (session reconnect only)")
                     return@launch
                 }
 
@@ -68,13 +55,12 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
                 val deviceMac = try {
                     device?.address?.uppercase()?.trim()
                 } catch (se: SecurityException) {
-                    // BLUETOOTH_CONNECT permission not granted at runtime — skip
                     AppLogger.w(TAG, "Cannot read device address — BLUETOOTH_CONNECT not granted", se)
                     null
                 }
 
                 if (deviceMac == null) {
-                    AppLogger.d(TAG, "BT auto-launch: could not read device MAC, ignoring")
+                    AppLogger.d(TAG, "BT auto-launch: could not read device MAC (session reconnect only)")
                     return@launch
                 }
 
@@ -83,13 +69,13 @@ class BluetoothAutoLaunchReceiver : BroadcastReceiver() {
                     val launchIntent = Intent(context, MainActivity::class.java).apply {
                         addFlags(
                             Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
                         )
                     }
                     context.startActivity(launchIntent)
                 } else {
-                    AppLogger.d(TAG, "BT auto-launch: $deviceMac ≠ $savedMac, ignoring")
+                    AppLogger.d(TAG, "BT auto-launch: $deviceMac ≠ $savedMac (session reconnect only)")
                 }
             } finally {
                 pendingResult.finish()

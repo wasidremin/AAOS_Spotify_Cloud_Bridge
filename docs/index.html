@@ -116,6 +116,44 @@
             : '<li>Your Client ID is already filled in from the car profile.</li><li>Enter the matching Client Secret so the page can finish the Spotify token exchange.</li><li>After approval, the car updates the existing profile in place instead of adding a duplicate.</li>';
     }
 
+    function persistAuthDraft(clientId, clientSecret) {
+        // sessionStorage alone is often cleared across the Spotify redirect on
+        // mobile browsers; mirror into localStorage for the same-tab return.
+        const draft = {
+            clientId,
+            clientSecret,
+            mode,
+            profileId: targetProfileId,
+            session: initialSession || ''
+        };
+        try {
+            sessionStorage.setItem('cb_auth_draft', JSON.stringify(draft));
+            localStorage.setItem('cb_auth_draft', JSON.stringify(draft));
+        } catch (_) { /* private mode */ }
+    }
+
+    function loadAuthDraft() {
+        for (const store of [sessionStorage, localStorage]) {
+            try {
+                const raw = store.getItem('cb_auth_draft');
+                if (raw) return JSON.parse(raw);
+            } catch (_) { /* ignore */ }
+        }
+        return null;
+    }
+
+    function clearAuthDraft() {
+        try {
+            sessionStorage.removeItem('cb_auth_draft');
+            localStorage.removeItem('cb_auth_draft');
+            // legacy keys
+            sessionStorage.removeItem('temp_client_id');
+            sessionStorage.removeItem('temp_client_secret');
+            sessionStorage.removeItem('temp_mode');
+            sessionStorage.removeItem('temp_profile_id');
+        } catch (_) { /* ignore */ }
+    }
+
     function startAuth(isAutomatic = false) {
         const clientId = document.getElementById('clientId').value.trim();
         const clientSecret = document.getElementById('clientSecret').value.trim();
@@ -126,10 +164,12 @@
             return;
         }
 
-        sessionStorage.setItem('temp_client_id', clientId);
-        sessionStorage.setItem('temp_client_secret', clientSecret);
-        sessionStorage.setItem('temp_mode', mode);
-        sessionStorage.setItem('temp_profile_id', targetProfileId);
+        if (!initialSession) {
+            alert('Missing car session code. Scan the QR code on the car again.');
+            return;
+        }
+
+        persistAuthDraft(clientId, clientSecret);
 
         if (isAutomatic) {
             document.getElementById('status-text').innerText = 'Opening Spotify approval...';
@@ -144,14 +184,22 @@
     }
 
     async function exchangeTokenAndSendToCar(code, sessionCode) {
-        const clientId = sessionStorage.getItem('temp_client_id');
-        const clientSecret = sessionStorage.getItem('temp_client_secret');
-        const tempMode = sessionStorage.getItem('temp_mode') || 'add';
-        const tempProfileId = sessionStorage.getItem('temp_profile_id') || '';
-        sessionStorage.clear();
+        const draft = loadAuthDraft() || {};
+        const clientId = draft.clientId || sessionStorage.getItem('temp_client_id');
+        const clientSecret = draft.clientSecret || sessionStorage.getItem('temp_client_secret');
+        const tempMode = draft.mode || sessionStorage.getItem('temp_mode') || 'add';
+        const tempProfileId = draft.profileId || sessionStorage.getItem('temp_profile_id') || '';
+        // Prefer OAuth state (must match the car QR code) over any stale draft session.
+        const carSession = (sessionCode || draft.session || '').toUpperCase();
 
         if (!clientId || !clientSecret) {
-            document.getElementById('status-text').innerText = 'Session lost. Please scan the QR code on your car again.';
+            document.getElementById('status-text').innerText =
+                'Session lost after Spotify redirect. Scan the QR on the car again (do not restart the car app mid-sign-in).';
+            return;
+        }
+        if (!carSession) {
+            document.getElementById('status-text').innerText =
+                'Missing car session code. Scan the QR code on the car again.';
             return;
         }
 
@@ -169,8 +217,12 @@
             });
 
             const tokenData = await tokenResponse.json();
-            if (!tokenData.refresh_token) {
-                throw new Error('Failed to get refresh token. Check if your Client Secret is correct.');
+            if (!tokenResponse.ok || !tokenData.refresh_token) {
+                throw new Error(
+                    tokenData.error_description ||
+                    tokenData.error ||
+                    'Failed to get refresh token. Check Client ID/Secret and Redirect URI.'
+                );
             }
 
             document.getElementById('status-text').innerText = 'Fetching your profile...';
@@ -178,8 +230,11 @@
                 headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
             });
             const profileData = await profileResponse.json();
+            if (!profileResponse.ok) {
+                throw new Error(profileData.error?.message || 'Failed to load Spotify profile.');
+            }
 
-            document.getElementById('status-text').innerText = 'Sending to car...';
+            document.getElementById('status-text').innerText = `Sending to car (code ${carSession})...`;
             const payload = {
                 clientId: clientId,
                 clientSecret: clientSecret,
@@ -189,16 +244,28 @@
                 targetProfileId: tempMode === 'refresh' && tempProfileId ? tempProfileId : null
             };
 
-            await fetch(`${FIREBASE_DB_URL}/sessions/${sessionCode}.json`, {
+            const putResponse = await fetch(`${FIREBASE_DB_URL}/sessions/${carSession}.json`, {
                 method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            const putBodyText = await putResponse.text();
+            if (!putResponse.ok) {
+                throw new Error(
+                    `Car relay write failed (HTTP ${putResponse.status}). ${putBodyText || 'Check network / Firebase rules.'}`
+                );
+            }
+            // Firebase returns the written JSON on success; "null" means something went wrong.
+            if (!putBodyText || putBodyText === 'null') {
+                throw new Error('Car relay write returned empty. Scan the car QR again and retry.');
+            }
 
+            clearAuthDraft();
             document.getElementById('loading-ui').classList.add('hidden');
             document.getElementById('success-ui').classList.remove('hidden');
             document.getElementById('success-copy').innerText = tempMode === 'refresh'
-                ? 'Your permissions were refreshed on the car. You can now close this window and look at your car\'s screen.'
-                : 'Your profile has been sent to the car. You can now close this window and look at your car\'s screen.';
+                ? `Permissions refreshed for car code ${carSession}. Look at the car screen — it should update within a few seconds.`
+                : `Profile sent for car code ${carSession}. Look at the car screen — it should leave Add Profile within a few seconds. If not, the car may be waiting on a different code (restarted app); scan the new QR and sign in again without restarting the car app.`;
         } catch (e) {
             document.getElementById('status-text').innerText = 'Error: ' + e.message;
         }

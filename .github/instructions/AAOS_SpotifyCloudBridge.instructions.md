@@ -18,6 +18,8 @@ You are an expert Android Automotive OS (AAOS) developer maintaining the **Spoti
 - Full SDS: [SOFTWARE_DESIGN_SPECIFICATION.md](../../SOFTWARE_DESIGN_SPECIFICATION.md)
 - Testing: [docs/TESTING.md](../../docs/TESTING.md)
 - Setup: [docs/SETUP_GUIDE.md](../../docs/SETUP_GUIDE.md)
+- Phone wake / Connect reliability: [docs/PHONE_WAKE.md](../../docs/PHONE_WAKE.md)
+- Connectivity audit: [docs/CONNECTIVITY_AUDIT.md](../../docs/CONNECTIVITY_AUDIT.md)
 
 ## 2. Tech Stack
 
@@ -61,17 +63,25 @@ app/src/main/kotlin/com/cloudbridge/spotify/
 │   ├── SpotifyApiService.kt          # Retrofit — api.spotify.com (library, devices, playback)
 │   └── RetrofitProvider.kt           # Dual Retrofit instances + RateLimitRetryInterceptor
 ├── player/
+│   ├── ConnectionState.kt            # ConnectionState + PlaybackTarget + command results
+│   ├── PlaybackSessionManager.kt     # Connect session + establishSession wake ladder
+│   ├── DeviceWakeCoordinator.kt      # Ordered wake steps
+│   ├── LastKnownDevice.kt            # Durable last Connect phone
+│   ├── BluetoothMediaLink.kt         # A2DP/HEADSET gate for AVRCP
+│   ├── AvrcpRecoveryStrategy.kt      # BT-gated AVRCP wakeup (phone targets only)
+│   ├── HttpCompanionWake.kt          # Optional advanced webhook (off by default)
 │   ├── DeviceManager.kt              # Device discovery with priority selection (2-min cache)
-│   ├── SpotifyPlaybackController.kt  # Playback command wrapper with 404 retry
-│   └── MediaSessionManager.kt        # MediaSession + StubPlayer for steering wheel buttons
+│   └── SpotifyPlaybackController.kt  # Playback command wrapper with typed failures
 ├── receiver/
-│   └── BluetoothAutoLaunchReceiver.kt  # Auto-launches app on Bluetooth connect
+│   └── BluetoothAutoLaunchReceiver.kt  # Auto-launch + ACL session reconnect
 ├── ui/
 │   ├── MainActivity.kt               # Compose entry point (distractionOptimized)
 │   ├── AddProfileViewModel.kt        # QR onboarding session + polling state
 │   ├── SpotifyViewModel.kt           # ViewModel — UI state and navigation orchestration
+│   ├── coordinator/                   # Library / pin / search coordinators
 │   ├── theme/                         # Material3 dark theme, Spotify color tokens
 │   ├── screens/                       # Home, Library, Search, NowPlaying, Queue, Settings, etc.
+│   │   └── library/                   # Per-tab library composables
 │   └── components/                    # MiniPlayer, AlbumArtTile, PlayerControls
 └── util/
     └── ApiResult.kt                   # Sealed result wrapper

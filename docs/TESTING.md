@@ -1,6 +1,6 @@
-# Testing Guide — Cloud-Bridge v2.8.0
+# Testing Guide — Cloud-Bridge v2.9.0
 
-This guide validates the current Cloud-Bridge developer template implementation: QR onboarding, multi-profile support, custom AAOS UI, and Spotify Web API remote-control behavior.
+This guide validates the current Cloud-Bridge developer template implementation: QR onboarding, multi-profile support, custom AAOS UI, Connect session reliability, and Spotify Web API remote-control behavior.
 
 ## 1. Unit Tests
 
@@ -25,6 +25,8 @@ This guide validates the current Cloud-Bridge developer template implementation:
 | `SpotifyAuthServiceTest` | network | Token refresh with Basic auth header, 401 error handling |
 | `SpotifyApiServiceTest` | network | Playlist items, generic library save/check/remove endpoints, devices, playback, queue, and explicit-track/audiobook-chapter payload parsing |
 | `DeviceManagerTest` | player | Smartphone priority selection, caching, refresh, error handling |
+| `PlaybackSessionManagerTest` | player | ConnectionState transitions, establishSession ladder, typed command results, last-known device, 403 vs AVRCP policy |
+| `DeviceWakeCoordinatorTest` | player | Ordered wake steps, AVRCP skip without media BT, optional webhook gating |
 | `CustomMixEngineTest` | domain | Daily Drive / decade mix generation rules, ordering, and deduplication |
 
 ### Test Stack
@@ -321,14 +323,22 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 3. **Expected**: Check logcat for `RateLimitRetryInterceptor` messages
 
 #### TC-12B: AVRCP Bluetooth Kickstart Recovery
-1. Start playback from the phone so the app memorizes an active device ID.
-2. Lock the phone and wait for the OS to deep-sleep Spotify.
-3. Trigger **Play**, **Resume**, **Next**, or another wrapped transport action from the car UI.
-4. **Expected**: The first cloud command may fail, then the app logs that the device is likely asleep.
-5. **Expected**: The app dispatches an AVRCP media-play event, waits briefly, refreshes discovery, and retries the playback command once.
-6. **Expected**: If `/devices` is temporarily empty, the app keeps using the remembered phone/device target instead of immediately giving up.
-7. **Expected**: If Spotify rejects the stale `device_id` with 404, the app retries once without `device_id` so Spotify can target the active session directly.
-8. **Expected**: The playback action succeeds when the phone wakes and reconnects.
+1. Start playback from the phone so the app memorizes an active device ID (last-known persisted).
+2. Lock the phone and wait for the OS to deep-sleep Spotify; ensure A2DP/HEADSET is still connected.
+3. Trigger **Play**, **Resume**, **Next**, or another transport action from the car UI.
+4. **Expected**: `establishSession` / command path may log discover → last-known → soft resume before AVRCP.
+5. **Expected**: With media Bluetooth linked, the app dispatches AVRCP media-play, waits, burst-rediscovers, and retries.
+6. **Expected**: If `/devices` is temporarily empty, Ready may still use remembered device with `verified=false`.
+7. **Expected**: 404 on stale `device_id` falls through to soft resume / no-device_id play once.
+8. **Expected**: Playback succeeds when the phone wakes and reconnects.
+9. **Expected (emulator / no BT phone)**: Log `AvrcpRecovery: Kickstart skipped: no Bluetooth A2DP/HEADSET` — no false wake.
+
+#### TC-12G: Optional Wake Webhook (advanced)
+1. Leave **Settings → Advanced: optional phone wake** empty; run establish with phone asleep and no Connect ads.
+2. **Expected**: Webhook step is skipped; user eventually sees clear "open Spotify on your phone" guidance.
+3. Configure a test webhook URL that logs POSTs; re-run establish when earlier steps fail.
+4. **Expected**: App POSTs `{"source":"cloud-bridge","action":"wake_spotify"}` only when URL is set.
+5. Clear the URL; confirm normal multi-user installs never require Home Assistant.
 
 #### TC-12C: Bluetooth Call Routing Safety
 1. Open **Settings** and confirm **Bluetooth Auto-Launch** is in manual mode, or disable it if a MAC address is configured.
@@ -344,6 +354,20 @@ adb shell am start --user 10 -n com.cloudbridge.spotify/.ui.MainActivity
 4. **Expected**: The phone does not suddenly start playing unrelated local queue content while the car UI is offline.
 5. Restore connectivity and retry.
 6. **Expected**: Normal cloud playback control resumes without requiring a manual app restart.
+
+#### TC-12E: PlaybackSessionManager Target Modes
+1. Open **Settings → Playback Device** and select **Phone**, then play a track.
+2. **Expected**: Commands target a smartphone Connect device; logcat `PlaybackSession` shows `PlaybackTarget.Phone`.
+3. Select **Car player** and play again (car Spotify must be available).
+4. **Expected**: Non-phone device is preferred; AVRCP kickstart is not used on command failure.
+5. Select **Automatic** and confirm phone-first selection when both are listed.
+6. Lock a specific device from the device list; force-stop and relaunch.
+7. **Expected**: Specific lock is restored; reconnect runs on profile activation without manual Settings intervention.
+
+#### TC-12F: ACL Reconnect Pipeline
+1. With the app backgrounded and a profile active, disconnect then reconnect Bluetooth.
+2. **Expected**: `BTAutoLaunch` / `PlaybackSession` logs show ACL-triggered reconnect after ~2s settle, even when auto-launch MAC is unset.
+3. If MAC auto-launch is configured and matches, MainActivity is also brought forward.
 
 #### TC-18: Navigation & MiniPlayer UI Fixes
 1. Start on any screen (Home, Library, Search, etc.)
@@ -365,13 +389,30 @@ Open a terminal alongside the emulator:
 
 ```bash
 # All app logs
-adb logcat | grep -E "SpotifyViewModel|SpotifyPlayback|DeviceManager|TokenRefresh"
+adb logcat | grep -E "SpotifyViewModel|SpotifyPlayback|DeviceManager|PlaybackSession|AvrcpRecovery|TokenRefresh"
+
+# Connect session + wake ladder
+adb logcat -s PlaybackSession:V DeviceWake:V AvrcpRecovery:V DeviceManager:V
 
 # Just playback flow
 adb logcat -s SpotifyPlaybackController:V DeviceManager:V
 
 # Network issues
 adb logcat -s RetrofitProvider:V TokenRefreshAuth:V
+```
+
+### Linux / AAOS emulator smoke (this host)
+
+```bash
+# Prefer same-cert upgrade so OAuth profiles are never wiped
+./scripts/install-debug.sh
+
+# Unit tests
+./gradlew testDebugUnitTest
+
+# Signed Play Store bundle
+./gradlew bundleRelease
+# → app/build/outputs/bundle/release/app-release.aab
 ```
 
 ## 3. Integration Test Strategy (Future)

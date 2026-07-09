@@ -7,10 +7,14 @@ import com.cloudbridge.spotify.cache.CacheDatabase
 import com.cloudbridge.spotify.data.SpotifyLibraryRepository
 import com.cloudbridge.spotify.domain.CustomMixEngine
 import com.cloudbridge.spotify.network.RetrofitProvider
+import com.cloudbridge.spotify.player.AvrcpRecoveryStrategy
 import com.cloudbridge.spotify.player.DeviceManager
+import com.cloudbridge.spotify.player.HttpCompanionWake
+import com.cloudbridge.spotify.player.PlaybackSessionManager
 import com.cloudbridge.spotify.player.SpotifyPlaybackController
 import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 
@@ -54,6 +58,9 @@ class SpotifyCloudBridgeApp : Application() {
         private set
 
     lateinit var playbackController: SpotifyPlaybackController
+        private set
+
+    lateinit var playbackSessionManager: PlaybackSessionManager
         private set
 
     lateinit var cacheDatabase: CacheDatabase
@@ -101,11 +108,24 @@ class SpotifyCloudBridgeApp : Application() {
         retrofitProvider = RetrofitProvider(tokenManager)
         AppLogger.d(TAG, "RetrofitProvider initialized")
 
-        deviceManager = DeviceManager(retrofitProvider.spotifyApi)
+        deviceManager = DeviceManager()
 
         playbackController = SpotifyPlaybackController(
+            api = retrofitProvider.spotifyApi
+        )
+
+        playbackSessionManager = PlaybackSessionManager(
             api = retrofitProvider.spotifyApi,
-            deviceManager = deviceManager
+            deviceManager = deviceManager,
+            recoveryStrategy = AvrcpRecoveryStrategy(this),
+            lastKnownStore = tokenManager.asLastKnownDeviceStore(),
+            companionWake = HttpCompanionWake(
+                urlProvider = {
+                    // Blocking read is fine: only called rarely on the wake ladder (IO thread).
+                    runBlocking { tokenManager.getCompanionWakeUrl() }
+                }
+            ),
+            scope = CoroutineScope(applicationScope.coroutineContext + Dispatchers.IO)
         )
 
         libraryRepository = SpotifyLibraryRepository(

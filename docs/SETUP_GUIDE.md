@@ -211,7 +211,15 @@ Or find **Cloud-Bridge** in the AAOS launcher/app list.
 
 ## 6B. Build a Signed Release AAB
 
-If you want to test the near-production build in the car, generate the release app bundle from the repo root:
+Generate the Play Store Android App Bundle from the repo root:
+
+**Linux / macOS**
+
+```bash
+./gradlew bundleRelease --console=plain
+```
+
+**Windows (PowerShell)**
 
 ```powershell
 & .\gradlew.bat bundleRelease --console=plain *>&1 | Tee-Object -FilePath release_bundle_output.log
@@ -223,10 +231,10 @@ Expected output artifact:
 
 Notes:
 
-- This project already points the `release` build type at the checked-in keystore in [release.keystore](../release.keystore).
-- Before any new release build, increment `versionCode` and `versionName` in [app/build.gradle.kts](../app/build.gradle.kts) so the car/device sees it as a new installable version.
-- AAB files are for distribution/testing pipelines, not direct `adb install` like a debug APK.
-- If you need a directly sideloadable release binary for the car, run `& .\gradlew.bat assembleRelease --console=plain *>&1 | Tee-Object -FilePath release_apk_output.log` and use [app/build/outputs/apk/release/app-release.apk](../app/build/outputs/apk/release/app-release.apk), or use `bundletool` to turn the AAB into device-specific APKs.
+- Release (and debug) use the `local` signing config in [app/build.gradle.kts](../app/build.gradle.kts), preferring `release.keystore` at the repo root (gitignored — keep a secure backup of the **Play upload** key).
+- Before any new release build, increment `versionCode` and `versionName` in [app/build.gradle.kts](../app/build.gradle.kts).
+- AAB files are for Play Console upload, not direct `adb install`. For sideload testing use `./scripts/install-debug.sh` (same-cert upgrade, preserves OAuth profiles) or `assembleRelease` + `adb install -r`.
+- If Play Console rejects the certificate, restore the original upload `release.keystore` that signed previous production bundles — do not generate a new one without resetting the upload key in Play App Signing.
 
 ## 7. Use the App
 

@@ -32,6 +32,12 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.ViewModelProvider
 import com.cloudbridge.spotify.SpotifyCloudBridgeApp
+import com.cloudbridge.spotify.player.EstablishPhase
+import com.cloudbridge.spotify.player.bannerText
+import com.cloudbridge.spotify.player.degradedBannerText
+import com.cloudbridge.spotify.player.offlineBannerText
+import com.cloudbridge.spotify.player.showsDegradedBanner
+import com.cloudbridge.spotify.player.showsOfflineBanner
 import com.cloudbridge.spotify.ui.components.MiniPlayer
 import com.cloudbridge.spotify.ui.screens.*
 import com.cloudbridge.spotify.ui.theme.CloudBridgeTheme
@@ -93,6 +99,7 @@ class MainActivity : ComponentActivity() {
                 api = app.retrofitProvider.spotifyApi,
                 playbackController = app.playbackController,
                 deviceManager = app.deviceManager,
+                sessionManager = app.playbackSessionManager,
                 tokenManager = app.tokenManager,
                 cacheDb = app.cacheDatabase,
                 libraryRepository = app.libraryRepository,
@@ -157,10 +164,14 @@ private fun CloudBridgeApp(
     val userProfiles by viewModel.userProfiles.collectAsState()
     val showNowPlaying by viewModel.showNowPlaying.collectAsState()
     val playback by viewModel.playbackState.collectAsState()
-    val isOffline by viewModel.isOffline.collectAsState()
+    val connectionState by viewModel.connectionState.collectAsState()
+    val establishPhase by viewModel.establishPhase.collectAsState()
     val requiresReauth by viewModel.requiresReauth.collectAsState()
-    val deviceNotFound by viewModel.deviceNotFoundError.collectAsState()
+    val degradedBannerDismissed by viewModel.degradedBannerDismissed.collectAsState()
     val rateLimitUntilEpochMs by viewModel.rateLimitUntilEpochMs.collectAsState()
+    val offlineBannerText = connectionState.offlineBannerText()
+    val degradedBannerText = connectionState.degradedBannerText()
+    val establishBannerText = establishPhase.bannerText()
     val rightPadding by viewModel.rightPadding.collectAsState()
     val now by produceState(initialValue = System.currentTimeMillis(), key1 = rateLimitUntilEpochMs) {
         value = System.currentTimeMillis()
@@ -170,6 +181,14 @@ private fun CloudBridgeApp(
         }
     }
     val rateLimitActive = rateLimitUntilEpochMs > now
+    val showOfflineBanner = connectionState.showsOfflineBanner()
+    val showEstablishBanner =
+        establishPhase != EstablishPhase.Idle && establishBannerText != null && !rateLimitActive
+    val showDegradedBanner =
+        connectionState.showsDegradedBanner() &&
+            !degradedBannerDismissed &&
+            degradedBannerText != null &&
+            !showEstablishBanner
     val hasProfiles = userProfiles.isNotEmpty()
 
     BackHandler(enabled = hasProfiles && (showNowPlaying || currentScreen !is SpotifyViewModel.Screen.Home)) {
@@ -366,7 +385,7 @@ private fun CloudBridgeApp(
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = isOffline && !rateLimitActive,
+            visible = showOfflineBanner && !rateLimitActive && offlineBannerText != null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
@@ -380,8 +399,31 @@ private fun CloudBridgeApp(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "Offline Mode - Reconnecting...",
+                    text = offlineBannerText.orEmpty(),
                     style = MaterialTheme.typography.titleSmall,
+                    color = SpotifyWhite
+                )
+            }
+        }
+
+        // Progressive session establish (wake ladder) — prefer over static degraded while active.
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showEstablishBanner && !showOfflineBanner,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = rightPadding.dp)
+                    .background(WarningOrange.copy(alpha = 0.94f))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = establishBannerText.orEmpty(),
+                    style = MaterialTheme.typography.labelLarge,
                     color = SpotifyWhite
                 )
             }
@@ -424,7 +466,7 @@ private fun CloudBridgeApp(
         }
 
         androidx.compose.animation.AnimatedVisibility(
-            visible = deviceNotFound && !rateLimitActive,
+            visible = showDegradedBanner && !rateLimitActive && !showOfflineBanner,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
@@ -442,11 +484,11 @@ private fun CloudBridgeApp(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        text = "Device not found. Check connection and retry.",
+                        text = degradedBannerText.orEmpty(),
                         style = MaterialTheme.typography.labelLarge,
                         color = SpotifyWhite
                     )
-                    IconButton(onClick = { viewModel.dismissDeviceNotFoundError() }) {
+                    IconButton(onClick = { viewModel.dismissDegradedBanner() }) {
                         Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = SpotifyWhite)
                     }
                 }

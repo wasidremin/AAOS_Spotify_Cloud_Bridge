@@ -95,19 +95,41 @@ class AddProfileViewModel(
             _refreshTargetName.value = targetProfile?.name
             _qrCodeUrl.value = buildSessionUrl(code, targetProfile)
 
+            var emptyPolls = 0
             while (isActive && !_isCompleted.value) {
                 try {
-                    val payload = cloudRelayService.getSession(code)
+                    val response = cloudRelayService.getSession(code)
+                    // HTTP 200 + null body = session not written yet (Firebase JSON null).
+                    // That is the normal "waiting for phone" state — not an error.
+                    val payload = if (response.isSuccessful) response.body() else null
+                    if (!response.isSuccessful) {
+                        AppLogger.w(TAG, "Profile poll HTTP ${response.code()} for session $code")
+                    }
                     if (payload != null) {
+                        AppLogger.i(
+                            TAG,
+                            "Relay payload received for session $code (profile=${payload.profileName})"
+                        )
+                        _errorMessage.value = null
                         _isCompleting.value = true
                         val existingProfile = (payload.targetProfileId ?: refreshProfileId)
                             ?.let { userProfileDao.getById(it) }
+                        // Never blank out an existing refresh token if the relay payload
+                        // is incomplete — that would force a re-login for no reason.
+                        val nextRefreshToken = payload.refreshToken.trim()
+                            .ifBlank { existingProfile?.refreshToken.orEmpty() }
+                        if (nextRefreshToken.isBlank()) {
+                            AppLogger.e(TAG, "Relay payload missing refresh token; keeping existing profile untouched")
+                            _errorMessage.value = "Sign-in payload incomplete (no refresh token). Retry QR flow."
+                            _isCompleting.value = false
+                            continue
+                        }
                         val profile = (existingProfile ?: UserProfile(
                             id = UUID.randomUUID().toString(),
                             name = payload.profileName.ifBlank { "Spotify Profile" },
                             clientId = payload.clientId,
                             clientSecret = payload.clientSecret,
-                            refreshToken = payload.refreshToken,
+                            refreshToken = nextRefreshToken,
                             accessToken = null,
                             tokenExpiryEpochMs = 0L,
                             profileImageUrl = payload.profileImageUrl
@@ -115,9 +137,12 @@ class AddProfileViewModel(
                             name = payload.profileName.ifBlank {
                                 existingProfile?.name ?: "Spotify Profile"
                             },
-                            clientId = payload.clientId,
+                            clientId = payload.clientId.ifBlank {
+                                existingProfile?.clientId.orEmpty()
+                            },
                             clientSecret = payload.clientSecret ?: existingProfile?.clientSecret,
-                            refreshToken = payload.refreshToken,
+                            refreshToken = nextRefreshToken,
+                            // Force a fresh access-token fetch with the new refresh token.
                             accessToken = null,
                             tokenExpiryEpochMs = 0L,
                             profileImageUrl = payload.profileImageUrl ?: existingProfile?.profileImageUrl
@@ -130,7 +155,23 @@ class AddProfileViewModel(
                         _isWaitingForProfile.value = false
                         _isCompleting.value = false
                         break
+                    } else {
+                        emptyPolls++
+                        if (emptyPolls == 1 || emptyPolls % 10 == 0) {
+                            AppLogger.d(
+                                TAG,
+                                "Still waiting for phone write to sessions/$code.json (polls=$emptyPolls)"
+                            )
+                        }
                     }
+                } catch (e: java.net.UnknownHostException) {
+                    AppLogger.w(TAG, "Profile polling DNS failure: ${e.message}")
+                    _errorMessage.value =
+                        "Cannot reach sign-in relay (DNS). Check emulator/host internet and DNS."
+                } catch (e: java.io.IOException) {
+                    AppLogger.w(TAG, "Profile polling network error: ${e.message}")
+                    _errorMessage.value =
+                        "Network error while waiting for sign-in. Check internet and retry."
                 } catch (e: Exception) {
                     AppLogger.w(TAG, "Profile polling error: ${e.message}")
                     _errorMessage.value = e.message ?: "Profile polling failed"

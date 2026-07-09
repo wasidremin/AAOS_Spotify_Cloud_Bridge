@@ -1,8 +1,6 @@
 package com.cloudbridge.spotify.ui
 
-import android.media.AudioManager
 import android.net.Uri
-import android.view.KeyEvent
 import com.cloudbridge.spotify.util.AppLogger
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -19,8 +17,17 @@ import com.cloudbridge.spotify.data.SpotifyLibraryRepository
 import com.cloudbridge.spotify.domain.CustomMixEngine
 import com.cloudbridge.spotify.network.SpotifyApiService
 import com.cloudbridge.spotify.network.model.*
+import com.cloudbridge.spotify.player.CommandResult
+import com.cloudbridge.spotify.player.ConnectionState
 import com.cloudbridge.spotify.player.DeviceManager
+import com.cloudbridge.spotify.player.OfflineReason
+import com.cloudbridge.spotify.player.PlaybackCommandResult
+import com.cloudbridge.spotify.player.PlaybackSessionManager
+import com.cloudbridge.spotify.player.PlaybackTarget
 import com.cloudbridge.spotify.player.SpotifyPlaybackController
+import com.cloudbridge.spotify.ui.coordinator.LibraryCatalogCoordinator
+import com.cloudbridge.spotify.ui.coordinator.PinController
+import com.cloudbridge.spotify.ui.coordinator.SearchCoordinator
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -43,94 +50,6 @@ import java.util.concurrent.TimeUnit
 import coil.Coil
 import coil.request.ImageRequest
 import retrofit2.HttpException
-
-/**
- * UI-friendly representation of a recently-played context (playlist or album).
- *
- * Built by hydrating the raw [PlayContext] URIs returned from
- * `GET /v1/me/player/recently-played` into full metadata via
- * per-item API calls.
- *
- * @property id       The Spotify object ID (e.g. playlist or album ID).
- * @property uri      The full Spotify URI (`spotify:playlist:...`).
- * @property title    Human-readable name of the context.
- * @property subtitle Type label — `"Playlist"` or `"Album"`.
- * @property imageUrl Best-quality cover art URL (may be `null`).
- * @property type     Object type: `"playlist"` or `"album"`.
- */
-data class RecentContextItem(
-    val id: String,
-    val uri: String,
-    val title: String,
-    val subtitle: String,
-    val imageUrl: String?,
-    val type: String
-)
-
-/**
- * Unified search result item displayed in the [SearchScreen] grid.
- *
- * Flattens Spotify's separate track / album / playlist search results
- * into a single list for the 4-column grid layout.
- *
- * @property id       The Spotify object ID.
- * @property uri      The full Spotify URI.
- * @property title    Track, album, or playlist name.
- * @property subtitle Artist name(s) for tracks, or type label for albums/playlists.
- * @property imageUrl Best-quality artwork URL (may be `null`).
- * @property type     `"track"`, `"album"`, or `"playlist"`.
- */
-data class SearchResultItem(
-    val id: String,
-    val uri: String,
-    val title: String,
-    val subtitle: String,
-    val imageUrl: String?,
-    val type: String
-)
-
-data class QueueItem(
-    val uniqueId: String = java.util.UUID.randomUUID().toString(),
-    val track: SpotifyPlayableItem
-)
-
-data class CustomMix(
-    val id: String,
-    val title: String,
-    val subtitle: String,
-    val colorHex: Long
-)
-
-data class PodcastUpdateInfo(
-    val showId: String,
-    val newEpisodeCount: Int,
-    val latestEpisodeName: String? = null,
-    val latestEpisodeReleaseDate: String? = null
-) {
-    val hasUpdates: Boolean get() = newEpisodeCount > 0
-
-    val badgeText: String
-        get() = when {
-            newEpisodeCount <= 0 -> ""
-            newEpisodeCount == 1 -> "NEW"
-            newEpisodeCount > 9 -> "9+ NEW"
-            else -> "$newEpisodeCount NEW"
-        }
-
-    fun subtitleSuffix(baseSubtitle: String?): String = when {
-        newEpisodeCount <= 0 -> baseSubtitle ?: "Podcast"
-        newEpisodeCount == 1 && !baseSubtitle.isNullOrBlank() -> "1 new episode · $baseSubtitle"
-        newEpisodeCount == 1 -> "1 new episode"
-        !baseSubtitle.isNullOrBlank() -> "$newEpisodeCount new episodes · $baseSubtitle"
-        else -> "$newEpisodeCount new episodes"
-    }
-}
-
-private enum class PlaybackCommandOutcome {
-    Success,
-    Failed,
-    NetworkFailure
-}
 
 /**
  * Central ViewModel — the "brain" of the Cloud Bridge Compose UI.
@@ -156,13 +75,16 @@ private enum class PlaybackCommandOutcome {
  * @param api                The Spotify Web API Retrofit interface.
  * @param playbackController Bridge to send playback commands to the phone.
  * @param deviceManager      Discovers the user's phone Spotify device.
+ * @param sessionManager     Owns Connect session health and command gating.
  * @see SpotifyPlaybackController
  * @see DeviceManager
+ * @see PlaybackSessionManager
  */
 class SpotifyViewModel(
     private val api: SpotifyApiService,
     private val playbackController: SpotifyPlaybackController,
     private val deviceManager: DeviceManager,
+    private val sessionManager: PlaybackSessionManager,
     private val tokenManager: TokenManager,
     private val cacheDb: CacheDatabase,
     private val libraryRepository: SpotifyLibraryRepository,
@@ -173,6 +95,23 @@ class SpotifyViewModel(
     private val hasProfilesOnDisk = runBlocking(Dispatchers.IO) {
         cacheDb.userProfileDao().getAllOnce().isNotEmpty()
     }
+
+    private val pinController = PinController(cacheDb, viewModelScope)
+    private val searchCoordinator = SearchCoordinator(
+        api = api,
+        scope = viewModelScope,
+        bestArtwork = { images -> bestArtwork(images) },
+        onApiFailure = { handleApiFailure(it) },
+        rethrowIfCancellation = { rethrowIfCancellation(it) }
+    )
+    private val libraryCatalog = LibraryCatalogCoordinator(
+        libraryRepository = libraryRepository,
+        bestArtwork = { images -> bestArtwork(images) },
+        prefetchImages = { urls -> prefetchImages(urls) },
+        onApiFailure = { handleApiFailure(it) },
+        rethrowIfCancellation = { rethrowIfCancellation(it) },
+        onShowsLoaded = { shows -> refreshPodcastUpdates(shows) }
+    )
 
     companion object {
         private const val TAG = "SpotifyViewModel"
@@ -186,14 +125,12 @@ class SpotifyViewModel(
         private const val HOME_REFRESH_COOLDOWN_MS = 60_000L
         private const val LIBRARY_REFRESH_COOLDOWN_MS = 90_000L
         private const val QUEUE_VISIBLE_REFRESH_MS = 15_000L
-        private const val BLUETOOTH_KICKSTART_DELAY_MS = 2000L
         private const val SAVED_STATUS_REFRESH_MS = 15_000L
         private const val MAX_LIKED_SONGS_DETAIL_LOAD = 500
         private const val MAX_QUEUE_BATCH = 100
         private const val MAX_UP_NEXT_ITEMS = 20
         private const val ENHANCED_PLAYLIST_GROUP_SIZE = 5
         private const val ENHANCED_PLAYLIST_RECOMMENDATIONS_PER_GROUP = 2
-        private val PINNABLE_TYPES = setOf("playlist", "album", "show")
         const val CUSTOM_MIX_DAILY_DRIVE = "daily_drive"
         private const val CUSTOM_MIX_80S = "mix_80s"
         private const val CUSTOM_MIX_90S = "mix_90s"
@@ -206,6 +143,7 @@ class SpotifyViewModel(
         private val api: SpotifyApiService,
         private val playbackController: SpotifyPlaybackController,
         private val deviceManager: DeviceManager,
+        private val sessionManager: PlaybackSessionManager,
         private val tokenManager: TokenManager,
         private val cacheDb: CacheDatabase,
         private val libraryRepository: SpotifyLibraryRepository,
@@ -218,6 +156,7 @@ class SpotifyViewModel(
                 api,
                 playbackController,
                 deviceManager,
+                sessionManager,
                 tokenManager,
                 cacheDb,
                 libraryRepository,
@@ -261,8 +200,7 @@ class SpotifyViewModel(
     private val _featuredPlaylists = MutableStateFlow<List<SpotifyPlaylist>>(emptyList())
     val featuredPlaylists: StateFlow<List<SpotifyPlaylist>> = _featuredPlaylists
 
-    val pinnedItems: StateFlow<List<PinnedItem>> = cacheDb.pinnedItemDao().getAllPinned()
-        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+    val pinnedItems: StateFlow<List<PinnedItem>> = pinController.pinnedItems
 
     val customMixes: List<CustomMix> = listOf(
         CustomMix(CUSTOM_MIX_DAILY_DRIVE, "Daily Drive", "Podcasts + music built from your library", 0xFF2563EB),
@@ -285,34 +223,22 @@ class SpotifyViewModel(
     private val _podcastUpdates = MutableStateFlow<Map<String, PodcastUpdateInfo>>(emptyMap())
     val podcastUpdates: StateFlow<Map<String, PodcastUpdateInfo>> = _podcastUpdates.asStateFlow()
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _searchResults = MutableStateFlow<List<SearchResultItem>>(emptyList())
-    val searchResults: StateFlow<List<SearchResultItem>> = _searchResults.asStateFlow()
-
-    private val _isSearchLoading = MutableStateFlow(false)
-    val isSearchLoading: StateFlow<Boolean> = _isSearchLoading.asStateFlow()
+    val searchQuery: StateFlow<String> = searchCoordinator.searchQuery
+    val searchResults: StateFlow<List<SearchResultItem>> = searchCoordinator.searchResults
+    val isSearchLoading: StateFlow<Boolean> = searchCoordinator.isSearchLoading
 
     // ── Library Data ─────────────────────────────────────────────────
 
-    private val _playlists = MutableStateFlow<List<SpotifyPlaylist>>(emptyList())
-    val playlists: StateFlow<List<SpotifyPlaylist>> = _playlists
-
-    private val _savedAlbums = MutableStateFlow<List<SpotifyAlbum>>(emptyList())
-    val savedAlbums: StateFlow<List<SpotifyAlbum>> = _savedAlbums
-
-    private val _savedShows = MutableStateFlow<List<SpotifyShow>>(emptyList())
-    val savedShows: StateFlow<List<SpotifyShow>> = _savedShows
-
-    private val _savedAudiobooks = MutableStateFlow<List<SpotifyAudiobook>>(emptyList())
-    val savedAudiobooks: StateFlow<List<SpotifyAudiobook>> = _savedAudiobooks
+    val playlists: StateFlow<List<SpotifyPlaylist>> = libraryCatalog.playlists
+    val savedAlbums: StateFlow<List<SpotifyAlbum>> = libraryCatalog.savedAlbums
+    val savedShows: StateFlow<List<SpotifyShow>> = libraryCatalog.savedShows
+    val savedAudiobooks: StateFlow<List<SpotifyAudiobook>> = libraryCatalog.savedAudiobooks
 
     /** Persists selected Library tab across back-stack navigation. */
     var libraryTab by mutableIntStateOf(0)
 
     /** Shows sorted by most recent episode date (for home screen). */
-    val showsSortedByRecent: StateFlow<List<SpotifyShow>> = _savedShows.asStateFlow()
+    val showsSortedByRecent: StateFlow<List<SpotifyShow>> = libraryCatalog.savedShows
 
     // ── Detail Data ──────────────────────────────────────────────────
 
@@ -376,6 +302,15 @@ class SpotifyViewModel(
     private val _lockedDeviceName = MutableStateFlow<String?>(null)
     val lockedDeviceName: StateFlow<String?> = _lockedDeviceName.asStateFlow()
 
+    /** Explicit Connect target preference (Auto / Phone / Car / Specific). */
+    val playbackTarget: StateFlow<PlaybackTarget> = sessionManager.playbackTarget
+
+    /** Live Connect session health for diagnostics / future banners. */
+    val connectionState: StateFlow<ConnectionState> = sessionManager.connectionState
+
+    /** Progressive wake steps (Looking for phone… / Bluetooth wake…). */
+    val establishPhase = sessionManager.establishPhase
+
     val btAutoLaunchMac: StateFlow<String?> = tokenManager.btAutoLaunchMacFlow
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -420,14 +355,12 @@ class SpotifyViewModel(
     private val _isDetailLoading = MutableStateFlow(false)
     val isDetailLoading: StateFlow<Boolean> = _isDetailLoading
 
-    private val _isOffline = MutableStateFlow(false)
-    val isOffline: StateFlow<Boolean> = _isOffline.asStateFlow()
-
     private val _requiresReauth = MutableStateFlow(false)
     val requiresReauth: StateFlow<Boolean> = _requiresReauth.asStateFlow()
 
-    private val _deviceNotFoundError = MutableStateFlow(false)
-    val deviceNotFoundError: StateFlow<Boolean> = _deviceNotFoundError.asStateFlow()
+    /** User dismissed the current degraded banner; cleared when connection state changes. */
+    private val _degradedBannerDismissed = MutableStateFlow(false)
+    val degradedBannerDismissed: StateFlow<Boolean> = _degradedBannerDismissed.asStateFlow()
 
     private val _rateLimitUntilEpochMs = MutableStateFlow(0L)
     val rateLimitUntilEpochMs: StateFlow<Long> = _rateLimitUntilEpochMs.asStateFlow()
@@ -443,7 +376,6 @@ class SpotifyViewModel(
 
     private var metadataSyncJob: Job? = null
     private var startupRecoveryJob: Job? = null
-    private var searchJob: Job? = null
     private var podcastUpdatesJob: Job? = null
     private var lastObservedProfileId: String? = null
     private var lastStartupRecoveryAttemptAtMs: Long = 0L
@@ -452,15 +384,7 @@ class SpotifyViewModel(
     private var recentContextsSettled = false
     private var featuredSettled = false
     private var newReleasesSettled = false
-    private var playlistsSettled = false
-    private var savedAlbumsSettled = false
-    private var savedShowsSettled = false
-    private var savedAudiobooksSettled = false
     private var devicesSettled = false
-    private val playlistsLoadMutex = Mutex()
-    private val savedAlbumsLoadMutex = Mutex()
-    private val savedShowsLoadMutex = Mutex()
-    private val savedAudiobooksLoadMutex = Mutex()
 
     // ── Lifecycle ────────────────────────────────────────────────────
 
@@ -521,12 +445,24 @@ class SpotifyViewModel(
         viewModelScope.launch {
             tokenManager.rateLimitUntilEpochMsFlow.collect { _rateLimitUntilEpochMs.value = it }
         }
+        viewModelScope.launch {
+            sessionManager.connectionState.collect { state ->
+                _degradedBannerDismissed.value = false
+                if (state is ConnectionState.Offline &&
+                    state.reason == OfflineReason.AuthExpired &&
+                    !hasDismissedReauthThisSession
+                ) {
+                    _requiresReauth.value = true
+                }
+            }
+        }
     }
 
     override fun onCleared() {
         super.onCleared()
         metadataSyncJob?.cancel()
         startupRecoveryJob?.cancel()
+        sessionManager.stopHealthLoop()
     }
 
     private suspend fun enterProfileSetupMode() {
@@ -536,8 +472,9 @@ class SpotifyViewModel(
         startupRecoveryJob = null
         homeFeedJob?.cancel()
         libraryJob?.cancel()
-        searchJob?.cancel()
+        searchCoordinator.cancel()
         podcastUpdatesJob?.cancel()
+        sessionManager.clearSession()
         backStack.clear()
         clearProfileScopedData()
         _showNowPlaying.value = false
@@ -552,6 +489,7 @@ class SpotifyViewModel(
     ) {
         if (clearProfileData) {
             clearProfileScopedData()
+            sessionManager.clearSession()
         }
 
         lastStartupRecoveryAttemptAtMs = System.currentTimeMillis()
@@ -559,18 +497,24 @@ class SpotifyViewModel(
         loadHomeFeed(forceRefresh = clearProfileData)
         loadLibrary(forceRefresh = clearProfileData)
         loadDevices(forceRefresh = clearProfileData)
+        sessionManager.startHealthLoop()
+        viewModelScope.launch {
+            sessionManager.establishSession(force = true)
+        }
         startMetadataSync(forceRestart = clearProfileData, immediateSync = true)
         scheduleStartupRecovery(profileId)
     }
 
     fun refreshPlaybackStateNow() {
         startMetadataSync(immediateSync = true)
+        sessionManager.onForegrounded()
     }
 
     fun refreshStartupDataIfNeeded() {
         if (shouldForceProfileSetup()) return
 
         val profileId = activeProfileId.value ?: lastObservedProfileId ?: return
+        sessionManager.onForegrounded()
         if (!isStartupBootstrapIncomplete()) return
 
         val now = System.currentTimeMillis()
@@ -583,6 +527,7 @@ class SpotifyViewModel(
         loadHomeFeed(forceRefresh = true)
         loadLibrary(forceRefresh = true)
         loadDevices(forceRefresh = true)
+        viewModelScope.launch { sessionManager.establishSession(force = true) }
         scheduleStartupRecovery(profileId)
     }
 
@@ -604,6 +549,7 @@ class SpotifyViewModel(
                 loadHomeFeed(forceRefresh = true)
                 loadLibrary(forceRefresh = true)
                 loadDevices(forceRefresh = true)
+                sessionManager.establishSession(force = true)
             }
         }
     }
@@ -615,8 +561,7 @@ class SpotifyViewModel(
     private fun isHomeDataSettled(): Boolean =
         recentContextsSettled && featuredSettled && newReleasesSettled
 
-    private fun isLibraryDataSettled(): Boolean =
-        playlistsSettled && savedAlbumsSettled && savedShowsSettled && savedAudiobooksSettled
+    private fun isLibraryDataSettled(): Boolean = libraryCatalog.isLibraryDataSettled()
 
     private fun shouldSkipHomeRefresh(forceRefresh: Boolean): Boolean {
         if (forceRefresh) return false
@@ -786,7 +731,7 @@ class SpotifyViewModel(
                         }
                     }
                     launch { loadRecentlyPlayed() }
-                    launch { loadSavedShows() }
+                    launch { libraryCatalog.loadSavedShows() }
                     launch { loadCustomMixArt() }
                     val topArtists = topArtistsDeferred.await()
                     launch { loadFeatured(topArtists) }
@@ -844,7 +789,7 @@ class SpotifyViewModel(
             }
 
             // Daily Drive — 2 podcast covers + 2 track covers
-            val shows = _savedShows.value.ifEmpty { libraryRepository.getSavedShows() }
+            val shows = libraryCatalog.savedShows.value.ifEmpty { libraryRepository.getSavedShows() }
             val podcastArts = shows
                 .mapNotNull { bestArtwork(it.images) }
                 .distinct()
@@ -865,106 +810,9 @@ class SpotifyViewModel(
         }
     }
 
-    /**
-     * Updates the search query and triggers a debounced search.
-     *
-    * Debounce: 750 ms delay after the last keystroke before firing
-     * the API call. Prevents spamming Spotify with partial queries
-     * while the user is still typing.
-     *
-     * @param query The current text in the search field.
-     */
-    fun updateSearchQuery(query: String) {
-        _searchQuery.value = query
-        searchJob?.cancel()
+    fun updateSearchQuery(query: String) = searchCoordinator.updateSearchQuery(query)
 
-        if (query.isBlank()) {
-            _searchResults.value = emptyList()
-            _isSearchLoading.value = false
-            return
-        }
-
-        searchJob = viewModelScope.launch {
-            delay(750)
-            performSearch(query)
-        }
-    }
-
-    fun retrySearch() {
-        val query = _searchQuery.value
-        if (query.isNotBlank()) {
-            searchJob?.cancel()
-            searchJob = viewModelScope.launch { performSearch(query) }
-        }
-    }
-
-    private suspend fun performSearch(query: String) = withContext(Dispatchers.IO) {
-        _isSearchLoading.value = true
-        try {
-            val response = api.search(query = query, limit = 10)
-
-            val playlists = response.playlists?.items
-                ?.filterNotNull()
-                ?.mapNotNull {
-                    val id = it.id ?: return@mapNotNull null
-                    val uri = it.uri ?: return@mapNotNull null
-                    SearchResultItem(
-                        id = id,
-                        uri = uri,
-                        title = it.name ?: "Unknown Playlist",
-                        subtitle = "Playlist",
-                        imageUrl = bestArtwork(it.images),
-                        type = "playlist"
-                    )
-                }
-                ?: emptyList()
-
-            val albums = response.albums?.items
-                ?.filterNotNull()
-                ?.mapNotNull { album ->
-                    val id = album.id ?: return@mapNotNull null
-                    val uri = album.uri ?: return@mapNotNull null
-                    SearchResultItem(
-                        id = id,
-                        uri = uri,
-                        title = album.name,
-                        subtitle = "Album",
-                        imageUrl = bestArtwork(album.images),
-                        type = "album"
-                    )
-                }
-                ?: emptyList()
-
-            val tracks = response.tracks?.items
-                ?.filterNotNull()
-                ?.mapNotNull { track ->
-                    val id = track.id ?: return@mapNotNull null
-                    SearchResultItem(
-                        id = id,
-                        uri = track.uri,
-                        title = track.name,
-                        subtitle = track.artists.joinToString(", ") { it.name },
-                        imageUrl = bestArtwork(track.album?.images),
-                        type = "track"
-                    )
-                }
-                ?: emptyList()
-
-            _searchResults.value = (playlists + albums + tracks).distinctBy { it.uri }
-            _isOffline.value = false
-        } catch (e: Exception) {
-            rethrowIfCancellation(e)
-            handleApiFailure(e)
-            AppLogger.e(TAG, "Search failed: ${e.message}", e)
-            if (e !is GlobalRateLimitException) {
-                _searchResults.value = emptyList()
-            }
-        } finally {
-            if (currentCoroutineContext().isActive) {
-                _isSearchLoading.value = false
-            }
-        }
-    }
+    fun retrySearch() = searchCoordinator.retrySearch()
 
     fun loadLibrary() {
         if (shouldSkipLibraryRefresh(forceRefresh = false)) {
@@ -984,10 +832,10 @@ class SpotifyViewModel(
             _isLibraryLoading.value = true
             try {
                 supervisorScope {
-                    launch { loadPlaylists() }
-                    launch { loadSavedAlbums() }
-                    launch { loadSavedShows() }
-                    launch { loadSavedAudiobooks() }
+                    launch { libraryCatalog.loadPlaylists() }
+                    launch { libraryCatalog.loadSavedAlbums() }
+                    launch { libraryCatalog.loadSavedShows() }
+                    launch { libraryCatalog.loadSavedAudiobooks() }
                 }
             } catch (e: Exception) {
                 rethrowIfCancellation(e)
@@ -1013,8 +861,8 @@ class SpotifyViewModel(
                 .filter { it.type == "playlist" || it.type == "album" }
                 .take(10)
 
-            val localPlaylists = _playlists.value.ifEmpty { libraryRepository.getCachedPlaylists() }
-            val localAlbums = _savedAlbums.value.ifEmpty { libraryRepository.getCachedAlbums() }
+            val localPlaylists = libraryCatalog.playlists.value.ifEmpty { libraryRepository.getCachedPlaylists() }
+            val localAlbums = libraryCatalog.savedAlbums.value.ifEmpty { libraryRepository.getCachedAlbums() }
             val playlistById = localPlaylists.associateBy { it.id }
             val albumById = localAlbums.mapNotNull { album -> album.id?.let { it to album } }.toMap()
 
@@ -1093,7 +941,6 @@ class SpotifyViewModel(
     ) = withContext(Dispatchers.IO) {
         try {
             _featuredPlaylists.value = loadLibraryFeaturedPlaylists(limit = 12)
-            _isOffline.value = false
             featuredSettled = true
             AppLogger.d(TAG, "Loaded ${_featuredPlaylists.value.size} suggested playlists")
         } catch (e: Exception) {
@@ -1111,10 +958,10 @@ class SpotifyViewModel(
         val excludedUris = pinnedUris + recentUris
 
         val allPlaylists = when {
-            _playlists.value.isNotEmpty() -> _playlists.value
+            libraryCatalog.playlists.value.isNotEmpty() -> libraryCatalog.playlists.value
             else -> {
                 val cached = libraryRepository.getCachedPlaylists()
-                if (cached.isNotEmpty()) cached else libraryRepository.refreshPlaylists().also { _playlists.value = it }
+                if (cached.isNotEmpty()) cached else libraryRepository.refreshPlaylists().also { libraryCatalog.setPlaylists(it) }
             }
         }
 
@@ -1145,7 +992,6 @@ class SpotifyViewModel(
         try {
             val response = api.getTopTracks(limit = 30)
             _topTracks.value = response.items.filterNotNull()
-            _isOffline.value = false
         } catch (e: Exception) {
             rethrowIfCancellation(e)
             handleApiFailure(e)
@@ -1174,131 +1020,12 @@ class SpotifyViewModel(
                 if (albums.size >= 12) break
             }
             _newReleases.value = albums.distinctBy { it.id }.take(12)
-            _isOffline.value = false
             newReleasesSettled = true
             AppLogger.d(TAG, "Loaded ${_newReleases.value.size} release tiles from top artists")
         } catch (e: Exception) {
             rethrowIfCancellation(e)
             handleApiFailure(e)
             AppLogger.e(TAG, "Failed to load new releases: ${e.message}")
-        }
-    }
-
-    private suspend fun loadPlaylists() = withContext(Dispatchers.IO) {
-        playlistsLoadMutex.withLock {
-            // Seed UI from cache so the list appears immediately, then refresh from network
-            var usedCachedData = false
-            if (_playlists.value.isEmpty()) {
-                val cached = libraryRepository.getCachedPlaylists()
-                if (cached.isNotEmpty()) {
-                    _playlists.value = cached
-                    usedCachedData = true
-                    AppLogger.d(TAG, "Preloaded ${cached.size} playlists from cache")
-                }
-            }
-
-            try {
-                val fresh = libraryRepository.refreshPlaylists()
-                _playlists.value = fresh
-                playlistsSettled = true
-                AppLogger.d(TAG, "Loaded ${fresh.size} playlists")
-                prefetchImages(fresh.map { bestArtwork(it.images) })
-            } catch (e: Exception) {
-                rethrowIfCancellation(e)
-                if (usedCachedData || _playlists.value.isNotEmpty()) {
-                    playlistsSettled = true
-                    AppLogger.w(TAG, "Playlist refresh failed; keeping cached library data warm")
-                }
-                AppLogger.e(TAG, "Failed to load playlists: ${e.message}")
-            }
-        }
-    }
-
-    private suspend fun loadSavedAlbums() = withContext(Dispatchers.IO) {
-        savedAlbumsLoadMutex.withLock {
-            // Seed UI from cache so albums list appears immediately
-            var usedCachedData = false
-            if (_savedAlbums.value.isEmpty()) {
-                val cached = libraryRepository.getCachedAlbums()
-                if (cached.isNotEmpty()) {
-                    _savedAlbums.value = cached
-                    usedCachedData = true
-                    AppLogger.d(TAG, "Preloaded ${cached.size} albums from cache")
-                }
-            }
-
-            try {
-                val fresh = libraryRepository.refreshSavedAlbums()
-                _savedAlbums.value = fresh
-                savedAlbumsSettled = true
-                prefetchImages(fresh.map { bestArtwork(it.images) })
-            } catch (e: Exception) {
-                rethrowIfCancellation(e)
-                if (usedCachedData || _savedAlbums.value.isNotEmpty()) {
-                    savedAlbumsSettled = true
-                    AppLogger.w(TAG, "Saved albums refresh failed; keeping cached library data warm")
-                }
-                AppLogger.e(TAG, "Failed to load saved albums: ${e.message}")
-            }
-        }
-    }
-
-    private suspend fun loadSavedShows() = withContext(Dispatchers.IO) {
-        savedShowsLoadMutex.withLock {
-            if (_savedShows.value.isNotEmpty()) return@withLock
-            // Seed UI from cache
-            var usedCachedData = false
-            val cached = libraryRepository.getCachedShows()
-            if (cached.isNotEmpty()) {
-                _savedShows.value = cached
-                usedCachedData = true
-                AppLogger.d(TAG, "Preloaded ${cached.size} shows from cache")
-            }
-            try {
-                val fresh = libraryRepository.refreshSavedShows()
-                _savedShows.value = fresh
-                _isOffline.value = false
-                savedShowsSettled = true
-                prefetchImages(fresh.map { bestArtwork(it.images) })
-                refreshPodcastUpdates(fresh)
-            } catch (e: Exception) {
-                rethrowIfCancellation(e)
-                handleApiFailure(e)
-                if (usedCachedData || _savedShows.value.isNotEmpty()) {
-                    savedShowsSettled = true
-                    AppLogger.w(TAG, "Saved shows refresh failed; keeping cached library data warm")
-                }
-                AppLogger.e(TAG, "Failed to load saved shows: ${e.message}")
-            }
-        }
-    }
-
-    private suspend fun loadSavedAudiobooks() = withContext(Dispatchers.IO) {
-        savedAudiobooksLoadMutex.withLock {
-            if (_savedAudiobooks.value.isNotEmpty()) return@withLock
-            // Seed UI from cache
-            var usedCachedData = false
-            val cached = libraryRepository.getCachedAudiobooks()
-            if (cached.isNotEmpty()) {
-                _savedAudiobooks.value = cached
-                usedCachedData = true
-                AppLogger.d(TAG, "Preloaded ${cached.size} audiobooks from cache")
-            }
-            try {
-                val fresh = libraryRepository.refreshSavedAudiobooks()
-                _savedAudiobooks.value = fresh
-                _isOffline.value = false
-                savedAudiobooksSettled = true
-                prefetchImages(fresh.map { bestArtwork(it.images) })
-            } catch (e: Exception) {
-                rethrowIfCancellation(e)
-                handleApiFailure(e)
-                if (usedCachedData || _savedAudiobooks.value.isNotEmpty()) {
-                    savedAudiobooksSettled = true
-                    AppLogger.w(TAG, "Saved audiobooks refresh failed; keeping cached library data warm")
-                }
-                AppLogger.e(TAG, "Failed to load saved audiobooks: ${e.message}")
-            }
         }
     }
 
@@ -1412,7 +1139,6 @@ class SpotifyViewModel(
                     _detailTracks.update { current -> current + page.items.filterNotNull().mapNotNull { it.track } }
                     offset += 50
                 } while (page.next != null && offset < page.total)
-                _isOffline.value = false
             } catch (e: Exception) {
                 rethrowIfCancellation(e)
                 if (e is retrofit2.HttpException && e.code() == 403) {
@@ -1457,7 +1183,6 @@ class SpotifyViewModel(
             _detailError.value = null
             try {
                 _detailTracks.value = libraryRepository.getSavedTracks(maxTracks = MAX_LIKED_SONGS_DETAIL_LOAD)
-                _isOffline.value = false
             } catch (e: Exception) {
                 rethrowIfCancellation(e)
                 handleApiFailure(e)
@@ -1514,7 +1239,6 @@ class SpotifyViewModel(
             _detailEpisodes.value = emptyList()
             try {
                 _detailEpisodes.value = libraryRepository.getShowEpisodes(showId)
-                _isOffline.value = false
             } catch (e: Exception) {
                 rethrowIfCancellation(e)
                 handleApiFailure(e)
@@ -1698,14 +1422,17 @@ class SpotifyViewModel(
         viewModelScope.launch {
             val resolvedUri = resolveTrackUriForPlayback(trackUri)
             val preserveContext = resolvedUri == trackUri && !contextUri.isNullOrBlank()
-            val outcome = attemptPlaybackCommandWithWakeup {
+            val success = runGatedPlayback("playTrack") { deviceId ->
                 if (preserveContext) {
-                    playbackController.play(trackUri = trackUri, contextUri = contextUri)
+                    playbackController.play(
+                        deviceId = deviceId,
+                        trackUri = trackUri,
+                        contextUri = contextUri
+                    )
                 } else {
-                    playbackController.play(trackUri = resolvedUri)
+                    playbackController.play(deviceId = deviceId, trackUri = resolvedUri)
                 }
             }
-            val success = applyPlaybackCommandOutcome(outcome)
             if (success && preserveContext) {
                 rememberPlaybackContext(contextUri, tracksForContext(contextUri))
             } else if (success) {
@@ -1720,16 +1447,19 @@ class SpotifyViewModel(
         openNowPlaying()
         viewModelScope.launch {
             val contextTracks = tracksForContext(contextUri)
-            val outcome = attemptPlaybackCommandWithWakeup {
-                if (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri)) {
-                    playResolvedTrackList(_detailTracks.value, rememberedContextUri = contextUri)
-                } else {
-                    playbackController.play(trackUri = null, contextUri = contextUri)
+            // Resolve filtered URI lists outside the gate — never nest executeCommand.
+            val success = if (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri)) {
+                playResolvedTrackList(_detailTracks.value, rememberedContextUri = contextUri)
+            } else {
+                val ok = runGatedPlayback("playContext") { deviceId ->
+                    playbackController.play(
+                        deviceId = deviceId,
+                        trackUri = null,
+                        contextUri = contextUri
+                    )
                 }
-            }
-            val success = applyPlaybackCommandOutcome(outcome)
-            if (success) {
-                rememberPlaybackContext(contextUri, contextTracks)
+                if (ok) rememberPlaybackContext(contextUri, contextTracks)
+                ok
             }
             delay(500)
             syncPlaybackState()
@@ -1746,7 +1476,6 @@ class SpotifyViewModel(
                     tracks = enhancedTracks,
                     rememberedContextUri = "enhanced:playlist:$playlistId"
                 )
-                _deviceNotFoundError.value = !success
                 if (success) {
                     delay(500)
                     syncPlaybackState()
@@ -1765,9 +1494,9 @@ class SpotifyViewModel(
             try {
                 val generatedUris = when (mixId) {
                     CUSTOM_MIX_DAILY_DRIVE -> {
-                        val savedShows = _savedShows.value.ifEmpty { libraryRepository.getSavedShows() }
-                        if (_savedShows.value.isEmpty() && savedShows.isNotEmpty()) {
-                            _savedShows.value = savedShows
+                        val savedShows = libraryCatalog.savedShows.value.ifEmpty { libraryRepository.getSavedShows() }
+                        if (libraryCatalog.savedShows.value.isEmpty() && savedShows.isNotEmpty()) {
+                            libraryCatalog.setSavedShows(savedShows)
                         }
                         customMixEngine.buildDailyDrive(_dailyDriveNewsId.value, savedShows)
                     }
@@ -1782,17 +1511,15 @@ class SpotifyViewModel(
                 }
 
                 val playbackUris = resolveUrisForPlayback(generatedUris)
-                val outcome = if (playbackUris.isNotEmpty()) {
-                    attemptPlaybackCommandWithWakeup {
-                        playbackController.play(uris = playbackUris)
+                val success = if (playbackUris.isNotEmpty()) {
+                    runGatedPlayback("playCustomMix") { deviceId ->
+                        playbackController.play(deviceId = deviceId, uris = playbackUris)
                     }
                 } else {
-                    PlaybackCommandOutcome.Failed
+                    false
                 }
-                val success = applyPlaybackCommandOutcome(outcome)
                 if (success) {
                     clearRememberedPlaybackContext()
-                    _isOffline.value = false
                     openNowPlaying()
                     delay(500)
                     syncPlaybackState()
@@ -1823,26 +1550,26 @@ class SpotifyViewModel(
     fun playTrackInContext(trackUri: String, contextUri: String, index: Int) {
         openNowPlaying()
         viewModelScope.launch {
-            val outcome = attemptPlaybackCommandWithWakeup {
-                if (
-                    contextUri == "spotify:user:me:collection" ||
-                    (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri))
-                ) {
-                    playResolvedTrackList(
-                        tracks = _detailTracks.value.drop(index),
-                        rememberedContextUri = contextUri
+            val useUriList = contextUri == "spotify:user:me:collection" ||
+                (_explicitFilterEnabled.value && shouldPlayLoadedTracksAsUris(contextUri))
+            val success = if (useUriList) {
+                playResolvedTrackList(
+                    tracks = _detailTracks.value.drop(index),
+                    rememberedContextUri = contextUri
+                )
+            } else {
+                val ok = runGatedPlayback("playTrackInContext") { deviceId ->
+                    playbackController.play(
+                        deviceId = deviceId,
+                        trackUri = trackUri,
+                        contextUri = contextUri,
+                        offsetPosition = index
                     )
-                } else {
-                    playbackController.play(trackUri = trackUri, contextUri = contextUri, offsetPosition = index)
                 }
-            }
-            val success = applyPlaybackCommandOutcome(outcome)
-            if (success) {
-                val rememberedTracks = when {
-                    contextUri == "spotify:user:me:collection" -> _detailTracks.value.drop(index)
-                    else -> tracksForContext(contextUri)
+                if (ok) {
+                    rememberPlaybackContext(contextUri, tracksForContext(contextUri))
                 }
-                rememberPlaybackContext(contextUri, rememberedTracks)
+                ok
             }
             delay(500)
             syncPlaybackState()
@@ -1855,14 +1582,13 @@ class SpotifyViewModel(
         AppLogger.d(TAG, "togglePlayPause: currently=${if (isCurrentlyPlaying) "playing" else "paused"}")
         _playbackState.update { it?.copy(isPlaying = !isCurrentlyPlaying) } // Instant UI update
         viewModelScope.launch {
-            val outcome = attemptPlaybackCommandWithWakeup {
+            runGatedPlayback("togglePlayPause") { deviceId ->
                 if (isCurrentlyPlaying) {
-                    playbackController.pause()
+                    playbackController.pause(deviceId)
                 } else {
-                    playbackController.forceResume()
+                    playbackController.forceResume(deviceId)
                 }
             }
-            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1871,10 +1597,9 @@ class SpotifyViewModel(
     fun resumePlayback() {
         openNowPlaying()
         viewModelScope.launch {
-            val outcome = attemptPlaybackCommandWithWakeup {
-                playbackController.forceResume()
+            runGatedPlayback("resumePlayback") { deviceId ->
+                playbackController.forceResume(deviceId)
             }
-            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1882,10 +1607,9 @@ class SpotifyViewModel(
 
     fun skipNext() {
         viewModelScope.launch {
-            val outcome = attemptPlaybackCommandWithWakeup {
-                playbackController.next()
+            runGatedPlayback("skipNext") { deviceId ->
+                playbackController.next(deviceId)
             }
-            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
@@ -1893,76 +1617,26 @@ class SpotifyViewModel(
 
     fun skipPrevious() {
         viewModelScope.launch {
-            val outcome = attemptPlaybackCommandWithWakeup {
-                playbackController.previous()
+            runGatedPlayback("skipPrevious") { deviceId ->
+                playbackController.previous(deviceId)
             }
-            applyPlaybackCommandOutcome(outcome)
             delay(500)
             syncPlaybackState()
         }
     }
 
-    private fun kickstartBluetoothMedia() {
-        try {
-            val audioManager = context.applicationContext.getSystemService(android.content.Context.AUDIO_SERVICE) as? AudioManager
-            if (audioManager == null) {
-                AppLogger.w(TAG, "Bluetooth kickstart skipped: AudioManager unavailable")
-                return
-            }
-
-            if (audioManager.mode == AudioManager.MODE_IN_CALL ||
-                audioManager.mode == AudioManager.MODE_IN_COMMUNICATION ||
-                audioManager.mode == AudioManager.MODE_RINGTONE
-            ) {
-                AppLogger.w(TAG, "Bluetooth kickstart skipped: call or ringtone audio is active")
-                return
-            }
-
-            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY))
-            audioManager.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY))
-            AppLogger.i(TAG, "Dispatched AVRCP Bluetooth kickstart")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to dispatch AVRCP Bluetooth kickstart: ${e.message}", e)
-        }
-    }
-
-    private suspend fun attemptPlaybackCommandWithWakeup(
-        command: suspend () -> Boolean
-    ): PlaybackCommandOutcome {
-        return try {
-            val firstAttempt = command()
-            if (firstAttempt) return PlaybackCommandOutcome.Success
-
-            AppLogger.w(TAG, "Playback command failed; device is likely asleep. Attempting AVRCP Bluetooth kickstart.")
-            kickstartBluetoothMedia()
-            delay(BLUETOOTH_KICKSTART_DELAY_MS)
-            deviceManager.refreshDeviceId()
-            if (command()) PlaybackCommandOutcome.Success else PlaybackCommandOutcome.Failed
-        } catch (e: IOException) {
-            _isOffline.value = true
-            AppLogger.w(TAG, "Playback command network failure; skipping AVRCP wakeup: ${e.message}", e)
-            PlaybackCommandOutcome.NetworkFailure
-        }
-    }
-
-    private fun applyPlaybackCommandOutcome(outcome: PlaybackCommandOutcome): Boolean {
-        return when (outcome) {
-            PlaybackCommandOutcome.Success -> {
-                _isOffline.value = false
-                _deviceNotFoundError.value = false
-                true
-            }
-
-            PlaybackCommandOutcome.Failed -> {
-                _deviceNotFoundError.value = true
-                false
-            }
-
-            PlaybackCommandOutcome.NetworkFailure -> {
-                _deviceNotFoundError.value = false
-                false
-            }
-        }
+    /**
+     * Gate playback commands through [PlaybackSessionManager].
+     * Connectivity banners are driven by session state observation.
+     * Command lambdas must return [PlaybackCommandResult] (not a bare Boolean)
+     * so 403 Forbidden never triggers AVRCP recovery.
+     */
+    private suspend fun runGatedPlayback(
+        commandName: String,
+        command: suspend (deviceId: String?) -> PlaybackCommandResult
+    ): Boolean {
+        val result = sessionManager.executeCommand(commandName, command)
+        return result is CommandResult.Success
     }
 
     fun skipBack15Seconds() {
@@ -1979,16 +1653,25 @@ class SpotifyViewModel(
 
     fun seekTo(positionMs: Long) {
         viewModelScope.launch {
-            playbackController.seek(positionMs)
-            _playbackState.update { it?.copy(progressMs = positionMs) }
+            val ok = runGatedPlayback("seek") { deviceId ->
+                playbackController.seek(deviceId, positionMs)
+            }
+            if (ok) {
+                _playbackState.update { it?.copy(progressMs = positionMs) }
+            }
         }
     }
 
     fun toggleShuffle() {
         viewModelScope.launch {
             val current = _playbackState.value?.shuffleState ?: false
-            playbackController.setShuffle(!current)
-            _playbackState.update { it?.copy(shuffleState = !current) }
+            val next = !current
+            val ok = runGatedPlayback("setShuffle") { deviceId ->
+                playbackController.setShuffle(deviceId, next)
+            }
+            if (ok) {
+                _playbackState.update { it?.copy(shuffleState = next) }
+            }
         }
     }
 
@@ -2000,8 +1683,12 @@ class SpotifyViewModel(
                 "context" -> "track"
                 else -> "off"
             }
-            playbackController.setRepeat(next)
-            _playbackState.update { it?.copy(repeatState = next) }
+            val ok = runGatedPlayback("setRepeat") { deviceId ->
+                playbackController.setRepeat(deviceId, next)
+            }
+            if (ok) {
+                _playbackState.update { it?.copy(repeatState = next) }
+            }
         }
     }
 
@@ -2116,8 +1803,8 @@ class SpotifyViewModel(
         hasDismissedReauthThisSession = true
     }
 
-    fun dismissDeviceNotFoundError() {
-        _deviceNotFoundError.value = false
+    fun dismissDegradedBanner() {
+        _degradedBannerDismissed.value = true
     }
 
     /**
@@ -2135,8 +1822,11 @@ class SpotifyViewModel(
                 _rateLimitUntilEpochMs.value = e.lockedUntilEpochMs
             }
 
-            is UnknownHostException, is SocketTimeoutException -> {
-                _isOffline.value = true
+            is UnknownHostException -> {
+                sessionManager.markOfflineFromTransport(OfflineReason.NoNetwork)
+            }
+            is SocketTimeoutException -> {
+                sessionManager.markOfflineFromTransport(OfflineReason.SpotifyUnreachable)
             }
 
             is HttpException -> {
@@ -2212,8 +1902,8 @@ class SpotifyViewModel(
     /**
      * Fetches the user's current playback state from Spotify.
      *
-     * Updates [_playbackState] and [_isTrackSaved]. Also toggles
-     * [_isOffline] based on network connectivity.
+     * Updates [_playbackState] and [_isTrackSaved]. Transport failures
+     * are reported through [PlaybackSessionManager].
      *
      * Errors are logged but never thrown — this is a non-critical
      * background sync; crashing would break the entire polling loop.
@@ -2234,13 +1924,13 @@ class SpotifyViewModel(
             }
 
             if (playback != null) {
-                _isOffline.value = false
-                _deviceNotFoundError.value = false // Auto-clear error when device is detected
+                sessionManager.markOnlineFromMetadata()
                 val playbackDevice = playback.device
                 if (playbackDevice?.isActive == true && !playbackDevice.id.isNullOrBlank()) {
-                    deviceManager.registerActiveDevice(
+                    sessionManager.observeActiveDevice(
                         id = playbackDevice.id!!,
-                        name = playbackDevice.name ?: "Active device"
+                        name = playbackDevice.name ?: "Active device",
+                        type = playbackDevice.type
                     )
                 }
                 _playbackState.value = playback
@@ -2298,13 +1988,13 @@ class SpotifyViewModel(
             handleApiFailure(e)
             AppLogger.w(TAG, "HTTP error during metadata sync: ${e.code()} ${e.message}")
         } catch (e: UnknownHostException) {
-            _isOffline.value = true
+            sessionManager.markOfflineFromTransport()
             AppLogger.w(TAG, "Metadata sync offline: ${e.message}")
         } catch (e: SocketTimeoutException) {
-            _isOffline.value = true
+            sessionManager.markOfflineFromTransport()
             AppLogger.w(TAG, "Metadata sync timeout: ${e.message}")
         } catch (e: java.io.IOException) {
-            _isOffline.value = true
+            sessionManager.markOfflineFromTransport()
             AppLogger.w(TAG, "Metadata sync I/O error: ${e.message}")
         } catch (e: Exception) {
             AppLogger.w(TAG, "Metadata sync error: ${e.message}")
@@ -2339,14 +2029,28 @@ class SpotifyViewModel(
      */
     private fun loadLockedDeviceSetting() {
         viewModelScope.launch(Dispatchers.IO) {
+            val mode = tokenManager.getPlaybackTargetMode()
             val lockedId = tokenManager.getLockedDeviceId()
             val lockedName = tokenManager.getLockedDeviceName()
             _lockedDeviceId.value = lockedId
             _lockedDeviceName.value = lockedName
-            deviceManager.lockedDeviceId = lockedId
-            if (lockedId != null) {
-                AppLogger.i(TAG, "Device locked to: $lockedName ($lockedId)")
+            val target = when (mode) {
+                TokenManager.PLAYBACK_TARGET_PHONE -> PlaybackTarget.Phone
+                TokenManager.PLAYBACK_TARGET_CAR -> PlaybackTarget.CarPlayer
+                TokenManager.PLAYBACK_TARGET_SPECIFIC -> {
+                    if (!lockedId.isNullOrBlank()) {
+                        PlaybackTarget.Specific(
+                            lockedId,
+                            lockedName?.ifBlank { "Locked device" } ?: "Locked device"
+                        )
+                    } else {
+                        PlaybackTarget.Auto
+                    }
+                }
+                else -> PlaybackTarget.Auto
             }
+            sessionManager.setPlaybackTarget(target)
+            AppLogger.i(TAG, "Playback target restored: $target")
         }
     }
 
@@ -2367,25 +2071,57 @@ class SpotifyViewModel(
         }
     }
 
-    /** Lock playback to a specific device. */
+    /** Lock playback to a specific device (PlaybackTarget.Specific). */
     fun lockDevice(deviceId: String, deviceName: String) {
         viewModelScope.launch(Dispatchers.IO) {
             tokenManager.lockDevice(deviceId, deviceName)
             _lockedDeviceId.value = deviceId
             _lockedDeviceName.value = deviceName
-            deviceManager.lockedDeviceId = deviceId
+            sessionManager.setPlaybackTarget(PlaybackTarget.Specific(deviceId, deviceName))
+            sessionManager.establishSession(force = true)
             AppLogger.i(TAG, "Locked to device: $deviceName ($deviceId)")
         }
     }
 
-    /** Unlock device — return to automatic discovery. */
+    /** Unlock device — return to automatic discovery (PlaybackTarget.Auto). */
     fun unlockDevice() {
         viewModelScope.launch(Dispatchers.IO) {
             tokenManager.unlockDevice()
             _lockedDeviceId.value = null
             _lockedDeviceName.value = null
-            deviceManager.lockedDeviceId = null
+            sessionManager.setPlaybackTarget(PlaybackTarget.Auto)
+            sessionManager.establishSession(force = true)
             AppLogger.i(TAG, "Device unlocked — auto-discovery enabled")
+        }
+    }
+
+    /** Explicit playback target picker (Phone / Car / Auto). Clears Specific lock. */
+    fun setPlaybackTargetPreference(target: PlaybackTarget) {
+        viewModelScope.launch(Dispatchers.IO) {
+            when (target) {
+                is PlaybackTarget.Specific -> {
+                    tokenManager.lockDevice(target.deviceId, target.deviceName)
+                    _lockedDeviceId.value = target.deviceId
+                    _lockedDeviceName.value = target.deviceName
+                }
+                is PlaybackTarget.Phone -> {
+                    tokenManager.savePlaybackTargetMode(TokenManager.PLAYBACK_TARGET_PHONE)
+                    _lockedDeviceId.value = null
+                    _lockedDeviceName.value = null
+                }
+                is PlaybackTarget.CarPlayer -> {
+                    tokenManager.savePlaybackTargetMode(TokenManager.PLAYBACK_TARGET_CAR)
+                    _lockedDeviceId.value = null
+                    _lockedDeviceName.value = null
+                }
+                is PlaybackTarget.Auto -> {
+                    tokenManager.savePlaybackTargetMode(TokenManager.PLAYBACK_TARGET_AUTO)
+                    _lockedDeviceId.value = null
+                    _lockedDeviceName.value = null
+                }
+            }
+            sessionManager.setPlaybackTarget(target)
+            sessionManager.establishSession(force = true)
         }
     }
 
@@ -2393,6 +2129,16 @@ class SpotifyViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             tokenManager.saveBtAutoLaunchMac(null)
             AppLogger.i(TAG, "Bluetooth auto-launch disabled")
+        }
+    }
+
+    val companionWakeUrl: StateFlow<String?> = tokenManager.companionWakeUrlFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Home Assistant webhook URL for phone Spotify wake (empty clears). */
+    fun saveCompanionWakeUrl(url: String?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            tokenManager.saveCompanionWakeUrl(url)
         }
     }
 
@@ -2409,6 +2155,7 @@ class SpotifyViewModel(
     }
 
     private suspend fun clearProfileScopedData() {
+        searchCoordinator.clear()
         cacheDb.libraryCacheDao().clearAll()
         cacheDb.pinnedItemDao().clearAll()
 
@@ -2418,10 +2165,7 @@ class SpotifyViewModel(
         _newReleases.value = emptyList()
         _customMixArt.value = emptyMap()
         _podcastUpdates.value = emptyMap()
-        _playlists.value = emptyList()
-        _savedAlbums.value = emptyList()
-        _savedShows.value = emptyList()
-        _savedAudiobooks.value = emptyList()
+        libraryCatalog.clear()
         _detailTracks.value = emptyList()
         _detailEpisodes.value = emptyList()
         _detailChapters.value = emptyList()
@@ -2439,8 +2183,6 @@ class SpotifyViewModel(
         _playbackState.value = null
         _isTrackSaved.value = false
         _deviceList.value = emptyList()
-        _deviceNotFoundError.value = false
-        _isOffline.value = false
         _requiresReauth.value = false
         _showNowPlaying.value = false
         lastSavedStatusTrackUri = null
@@ -2449,10 +2191,6 @@ class SpotifyViewModel(
         recentContextsSettled = false
         featuredSettled = false
         newReleasesSettled = false
-        playlistsSettled = false
-        savedAlbumsSettled = false
-        savedShowsSettled = false
-        savedAudiobooksSettled = false
         devicesSettled = false
         libraryTab = 0
     }
@@ -2691,10 +2429,7 @@ class SpotifyViewModel(
 
         openNowPlaying()
         viewModelScope.launch(Dispatchers.IO) {
-            val outcome = attemptPlaybackCommandWithWakeup {
-                playResolvedTrackList(tracks)
-            }
-            val success = applyPlaybackCommandOutcome(outcome)
+            val success = playResolvedTrackList(tracks)
             if (success) {
                 delay(500)
                 syncPlaybackState()
@@ -2712,13 +2447,11 @@ class SpotifyViewModel(
 
             _detailTracks.value = recommendedTracks
             val uris = resolveTrackUrisForPlayback(recommendedTracks)
-            val success = uris.isNotEmpty() && playbackController.play(uris = uris)
+            val success = uris.isNotEmpty() && runGatedPlayback("startRadio") { deviceId ->
+                playbackController.play(deviceId = deviceId, uris = uris)
+            }
             if (success) {
                 rememberPlaybackContext("radio:$source", recommendedTracks)
-            }
-            _deviceNotFoundError.value = !success
-            if (success) {
-                _isOffline.value = false
                 openNowPlaying()
                 delay(500)
                 syncPlaybackState()
@@ -2736,7 +2469,10 @@ class SpotifyViewModel(
         rememberedContextUri: String? = null
     ): Boolean {
         val uris = resolveTrackUrisForPlayback(tracks)
-        val success = uris.isNotEmpty() && playbackController.play(uris = uris)
+        if (uris.isEmpty()) return false
+        val success = runGatedPlayback("playResolvedTrackList") { deviceId ->
+            playbackController.play(deviceId = deviceId, uris = uris)
+        }
         if (success && !rememberedContextUri.isNullOrBlank()) {
             rememberPlaybackContext(rememberedContextUri, tracks)
         } else if (success) {
@@ -2776,20 +2512,21 @@ class SpotifyViewModel(
         val distinctUris = uris.filter { it.isNotBlank() }.distinct().take(MAX_QUEUE_BATCH)
         if (distinctUris.isEmpty()) return
 
-        var allSucceeded = true
-        try {
-            distinctUris.forEach { uri ->
-                val success = playbackController.addToQueue(uri)
-                if (!success) allSucceeded = false
+        // One session gate for the whole batch — avoid N reconnect/AVRCP storms.
+        runGatedPlayback("addToQueueBatch") { deviceId ->
+            var lastFailure: PlaybackCommandResult.Failure? = null
+            for (uri in distinctUris) {
+                when (val r = playbackController.addToQueue(deviceId, uri)) {
+                    is PlaybackCommandResult.Success -> Unit
+                    is PlaybackCommandResult.Failure -> {
+                        lastFailure = r
+                        // 403 is terminal for the batch — no point hammering the API.
+                        if (r.kind == PlaybackCommandResult.Failure.Kind.Forbidden) break
+                    }
+                }
             }
-        } catch (e: IOException) {
-            _isOffline.value = true
-            _deviceNotFoundError.value = false
-            AppLogger.w(TAG, "Queue enqueue failed due to network drop: ${e.message}", e)
-            return
+            lastFailure ?: PlaybackCommandResult.Success
         }
-
-        _deviceNotFoundError.value = !allSucceeded
         delay(250)
         syncQueueState()
     }
@@ -2884,7 +2621,7 @@ class SpotifyViewModel(
         else -> false
     }
 
-    fun isPinnableType(type: String): Boolean = type in PINNABLE_TYPES
+    fun isPinnableType(type: String): Boolean = pinController.isPinnableType(type)
 
     fun openPinnedItem(item: PinnedItem) {
         when (item.type) {
@@ -2895,7 +2632,7 @@ class SpotifyViewModel(
     }
 
     fun togglePin(item: PinnedItem) {
-        togglePin(
+        pinController.togglePin(
             id = item.id,
             name = item.name,
             uri = item.uri,
@@ -2905,124 +2642,25 @@ class SpotifyViewModel(
         )
     }
 
-    fun togglePinForPlaylist(playlist: SpotifyPlaylist) {
-        if (playlist.id == null || playlist.uri == null) return
-        togglePin(
-            id = playlist.id,
-            name = playlist.name ?: "Unknown Playlist",
-            uri = playlist.uri,
-            subtitle = "${playlist.itemCount} tracks",
-            imageUrl = bestArtwork(playlist.images),
-            type = "playlist"
-        )
-    }
+    fun togglePinForPlaylist(playlist: SpotifyPlaylist) = pinController.togglePinForPlaylist(playlist)
 
-    fun togglePinForAlbum(album: SpotifyAlbum) {
-        togglePin(
-            id = album.id ?: return,
-            name = album.name,
-            uri = album.uri ?: return,
-            subtitle = album.artists?.joinToString(", ") { it.name },
-            imageUrl = bestArtwork(album.images),
-            type = "album"
-        )
-    }
+    fun togglePinForAlbum(album: SpotifyAlbum) = pinController.togglePinForAlbum(album)
 
-    fun togglePinForShow(show: SpotifyShow) {
-        togglePin(
-            id = show.id,
-            name = show.name,
-            uri = show.uri,
-            subtitle = show.publisher ?: "Podcast",
-            imageUrl = bestArtwork(show.images),
-            type = "show"
-        )
-    }
+    fun togglePinForShow(show: SpotifyShow) = pinController.togglePinForShow(show)
 
-    fun togglePinForRecentContext(item: RecentContextItem) {
-        when (item.type) {
-            "playlist", "album" -> togglePin(
-                id = item.id,
-                name = item.title,
-                uri = item.uri,
-                subtitle = item.subtitle,
-                imageUrl = item.imageUrl,
-                type = item.type
-            )
-        }
-    }
+    fun togglePinForRecentContext(item: RecentContextItem) = pinController.togglePinForRecentContext(item)
 
-    fun togglePinForSearchResult(item: SearchResultItem) {
-        when (item.type) {
-            "playlist", "album" -> togglePin(
-                id = item.id,
-                name = item.title,
-                uri = item.uri,
-                subtitle = item.subtitle,
-                imageUrl = item.imageUrl,
-                type = item.type
-            )
-        }
-    }
+    fun togglePinForSearchResult(item: SearchResultItem) = pinController.togglePinForSearchResult(item)
 
-    fun togglePin(id: String, name: String, uri: String, subtitle: String?, imageUrl: String?, type: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            if (!isPinnableType(type) || id.isBlank() || uri.isBlank() || name.isBlank()) return@launch
-            val dao = cacheDb.pinnedItemDao()
-            val currentPins = dao.getAllPinnedSync()
-            if (currentPins.any { it.uri == uri }) {
-                dao.deleteByUri(uri)
-                dao.updateAll(
-                    currentPins.filterNot { it.uri == uri }
-                        .mapIndexed { index, item -> item.copy(orderIndex = index) }
-                )
-            } else {
-                val newPin = PinnedItem(uri, id, name, subtitle, imageUrl, type, currentPins.size)
-                dao.insert(newPin)
-            }
-        }
-    }
+    fun togglePin(id: String, name: String, uri: String, subtitle: String?, imageUrl: String?, type: String) =
+        pinController.togglePin(id, name, uri, subtitle, imageUrl, type)
 
-    fun movePinUp(uri: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val dao = cacheDb.pinnedItemDao()
-            val current = dao.getAllPinnedSync().toMutableList()
-            val index = current.indexOfFirst { it.uri == uri }
-            if (index > 0) {
-                val temp = current[index]
-                current[index] = current[index - 1]
-                current[index - 1] = temp
-                current.forEachIndexed { i, item -> current[i] = item.copy(orderIndex = i) }
-                dao.updateAll(current)
-            }
-        }
-    }
+    fun movePinUp(uri: String) = pinController.movePinUp(uri)
 
-    fun movePinDown(uri: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val dao = cacheDb.pinnedItemDao()
-            val current = dao.getAllPinnedSync().toMutableList()
-            val index = current.indexOfFirst { it.uri == uri }
-            if (index >= 0 && index < current.size - 1) {
-                val temp = current[index]
-                current[index] = current[index + 1]
-                current[index + 1] = temp
-                current.forEachIndexed { i, item -> current[i] = item.copy(orderIndex = i) }
-                dao.updateAll(current)
-            }
-        }
-    }
+    fun movePinDown(uri: String) = pinController.movePinDown(uri)
 
-    fun removePin(uri: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val dao = cacheDb.pinnedItemDao()
-            dao.deleteByUri(uri)
-            dao.updateAll(
-                dao.getAllPinnedSync().filterNot { it.uri == uri }
-                    .mapIndexed { index, item -> item.copy(orderIndex = index) }
-            )
-        }
-    }
+    fun removePin(uri: String) = pinController.removePin(uri)
+
 
 
 }

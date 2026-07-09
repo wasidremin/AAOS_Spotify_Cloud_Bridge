@@ -77,6 +77,19 @@ AAOS Launcher → MainActivity (distractionOptimized)
 
 See `docs/ARCHITECTURE.md` for the full architecture document.
 
+### Connect reliability & phone wake
+
+Cloud-Bridge cannot open Spotify on a stock iPhone over raw IP. By default it:
+
+1. Discovers Connect devices and reuses the **last known phone**
+2. Tries a soft resume when the cloud session still exists
+3. Sends **Bluetooth AVRCP** media-play **only if** A2DP/HEADSET is connected (typical real car; skipped on emulator)
+4. Shows a clear prompt if the phone still is not advertising
+
+An optional **wake webhook** (Home Assistant, etc.) can be set under
+**Settings → Advanced: optional phone wake**. It is **off by default** and not
+required for normal use. Details: [`docs/PHONE_WAKE.md`](docs/PHONE_WAKE.md).
+
 ## Tech Stack
 
 | Component | Technology |
@@ -157,9 +170,11 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 - Spotify 429 penalties now trigger a global lockout persisted in `TokenManager`, surfaced through a top warning banner, and enforced by the API auth/interceptor stack so the app stops issuing outbound Spotify API requests until the lockout expires.
 - `TokenManager` now resolves auth from the active Room-backed profile before interceptors and token refresh paths read credentials.
 - The manifest no longer classifies Cloud-Bridge as an `audio` app or requests media foreground-service permissions, keeping the UI positioned as a remote-control surface instead of a local AAOS media source.
-- Playback metadata now passively memorizes the last active Spotify device ID, and failed transport commands can dispatch an AVRCP Bluetooth media-play kickstart through Android `AudioManager` before retrying discovery once.
-- AVRCP kickstart is now skipped while call, ringtone, or communication audio modes are active so Bluetooth HFP call routing stays under the native stack.
-- Device discovery now falls back to any active unrestricted Connect target and preserves the remembered phone/device ID across short `/devices` blind spots, reducing the need to wake the phone manually when Spotify temporarily stops advertising it.
+- `PlaybackSessionManager` owns Connect health (`ConnectionState`) and runs a single establish/wake ladder: discover → last-known transfer → soft resume → BT-gated AVRCP → optional webhook → burst rediscover.
+- Last successful phone Connect identity is persisted (survives process death); Ready can use `verified=false` across short `/devices` blind spots.
+- AVRCP media-play runs only when A2DP/HEADSET is connected and only for phone-oriented targets; skipped on emulator without media BT, during calls/HFP, and when the session is already Ready+verified.
+- Optional Home Assistant (or similar) wake webhook is Settings → Advanced only — off by default for multi-user installs. See `docs/PHONE_WAKE.md`.
+- Debug and release share one local signing identity so `scripts/install-debug.sh` can upgrade without uninstalling (OAuth tokens / profiles preserved).
 - Queue's podcast-aware **Up Next** synthesis now caches the active show's episode slice for the current playback session, preventing repeated `GET /v1/shows/{id}/episodes` calls every metadata poll while the Queue screen stays open.
 - The app displays an in-app top red banner: **"Offline Mode - Reconnecting..."** when connectivity drops.
 - The app also surfaces Spotify auth/scope failures (HTTP 401/403) with a top banner and direct **Open** action into Setup.
@@ -177,9 +192,18 @@ See `docs/ARCHITECTURE.md` for the full architecture document.
 ## Testing
 
 ```bash
-# Unit tests
-./gradlew test
+# Unit tests (includes PlaybackSessionManager + DeviceWakeCoordinator)
+./gradlew testDebugUnitTest
+
+# Emulator install without wiping tokens (same-cert upgrade)
+./scripts/install-debug.sh
+
+# Play Store Android App Bundle
+./gradlew bundleRelease
+# Output: app/build/outputs/bundle/release/app-release.aab
 ```
+
+See `docs/TESTING.md` and `docs/PHONE_WAKE.md` for Connect reliability scenarios.
 
 ## Project Structure
 
@@ -190,15 +214,17 @@ app/src/main/kotlin/com/cloudbridge/spotify/
 ├── data/                              # Repository layer (SpotifyLibraryRepository)
 ├── domain/                            # CustomMixEngine (Decade mixes, Daily Drive)
 ├── network/                           # Retrofit services & Moshi data models
-├── player/                            # SpotifyPlaybackController & DeviceManager
-├── receiver/                          # Bluetooth auto-launch capabilities
+├── player/                            # PlaybackSessionManager, wake ladder, controller
+├── receiver/                          # Bluetooth auto-launch + ACL session reconnect
 ├── cache/                             # Room DB entities and DAOs
 ├── ui/
 │   ├── MainActivity.kt               # Compose entry point (distractionOptimized)
 │   ├── SpotifyViewModel.kt           # StateFlow + navigation orchestration
 │   ├── AddProfileViewModel.kt        # QR polling orchestration
+│   ├── coordinator/                   # Library / pin / search coordinators
 │   ├── theme/                         # Material3 dark theme, Typography, Colors
 │   ├── screens/                       # Home, Library, NowPlaying, Queue, Settings, etc.
+│   │   └── library/                   # Per-tab library composables
 │   └── components/                    # MiniPlayer, AlbumArtTile, PlayerControls
 └── util/                              # Sealed ApiResult wrappers
 ```

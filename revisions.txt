@@ -1,4 +1,73 @@
 ═══════════════════════════════════════════════════════════════
+ R5.30  —  2026-07-09
+═══════════════════════════════════════════════════════════════
+ Summary: Release 2.9.0 — Connect reliability, establish/wake ladder, Play Store AAB
+
+ Changes:
+   • Bumped versionCode 19 → 20 and versionName 2.8.4 → 2.9.0 for Play Store
+   • Shipped PlaybackSessionManager as single ConnectionState owner with typed PlaybackCommandResult
+   • establishSession wake ladder: discover → last-known transfer → soft resume → BT-gated AVRCP → optional webhook → burst rediscover
+   • Durable LastKnownDevice (DataStore); AVRCP only when A2DP/HEADSET connected; HA webhook optional advanced only
+   • Same local signing for debug+release so install-debug.sh upgrades never wipe OAuth profiles
+   • ViewModel modularization: LibraryCatalogCoordinator, PinController, SearchCoordinator; Library screen split into library/*
+   • docs: PHONE_WAKE.md, CONNECTIVITY_AUDIT.md, ARCHITECTURE/TESTING/SETUP/README/agent instructions updated
+   • Unit tests: PlaybackSessionManagerTest + DeviceWakeCoordinatorTest (full suite green)
+   • Generated signed release AAB for Play Console upload
+
+ Files Modified:
+   • app/build.gradle.kts (version + local signing)
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/* (session, wake, typed results)
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/* (coordinators, Settings advanced wake)
+   • app/src/test/kotlin/com/cloudbridge/spotify/player/*
+   • docs/PHONE_WAKE.md, docs/CONNECTIVITY_AUDIT.md, docs/ARCHITECTURE.md, docs/TESTING.md, docs/SETUP_GUIDE.md
+   • README.md, revisions.txt, .github/instructions/*
+   • app/build/outputs/bundle/release/app-release.aab (generated, gitignored)
+
+ Build: PASS
+ Tests: PASS
+ Emulator: SMOKE TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+ R5.29  —  2026-07-08
+═══════════════════════════════════════════════════════════════
+ Summary: Architectural rework of Spotify Connect connectivity — PlaybackSessionManager state machine
+
+ Changes:
+   • Added PlaybackSessionManager as single owner of Connect session health (ConnectionState + PlaybackTarget)
+   • Command gate: play/pause/skip run through executeCommand; AVRCP is optional RecoveryStrategy for phone targets only
+   • Explicit target modes in Settings: Automatic / Phone / Car player / Specific lock (persisted)
+   • ACL_CONNECTED always schedules session reconnect (2s settle); onResume/profile activation also reconnect
+   • Fixed play() early-return on null device and DeviceManager cache tryLock race
+   • ViewModel banners map from ConnectionState; connectivity logic pulled out of SpotifyViewModel
+   • Unit tests: PlaybackSessionManagerTest + expanded DeviceManagerTest
+   • docs/CONNECTIVITY_AUDIT.md root-cause analysis; ARCHITECTURE + TESTING updated
+
+ Files Modified:
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/ConnectionState.kt (new)
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/PlaybackSessionManager.kt (new)
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/AvrcpRecoveryStrategy.kt (new)
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/DeviceManager.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/player/SpotifyPlaybackController.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/SpotifyViewModel.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/MainActivity.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/ui/screens/SettingsScreen.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/SpotifyCloudBridgeApp.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/receiver/BluetoothAutoLaunchReceiver.kt
+   • app/src/main/kotlin/com/cloudbridge/spotify/auth/TokenManager.kt
+   • app/src/test/kotlin/com/cloudbridge/spotify/player/PlaybackSessionManagerTest.kt (new)
+   • app/src/test/kotlin/com/cloudbridge/spotify/player/DeviceManagerTest.kt
+   • docs/CONNECTIVITY_AUDIT.md (new)
+   • docs/ARCHITECTURE.md
+   • docs/TESTING.md
+   • revisions.txt
+
+ Build: PASS
+ Tests: PASS
+ Emulator: NOT TESTED
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
  R5.28  —  2026-03-31
 ═══════════════════════════════════════════════════════════════
  Summary: Release build v2.8.4 — bumped the publish version after Play rejected versionCode 18 as already used

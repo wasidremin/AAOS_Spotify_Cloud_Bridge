@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.cloudbridge.spotify.cache.UserProfile
 import com.cloudbridge.spotify.cache.UserProfileDao
+import com.cloudbridge.spotify.player.LastKnownDevice
+import com.cloudbridge.spotify.player.LastKnownDeviceStore
 import com.cloudbridge.spotify.util.AppLogger
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -54,7 +56,17 @@ class TokenManager(
         private val KEY_RATE_LIMIT_RETRY_AFTER_SECONDS = longPreferencesKey("rate_limit_retry_after_seconds")
         private val KEY_LOCKED_DEVICE_ID = stringPreferencesKey("locked_device_id")
         private val KEY_LOCKED_DEVICE_NAME = stringPreferencesKey("locked_device_name")
+        private val KEY_PLAYBACK_TARGET_MODE = stringPreferencesKey("playback_target_mode")
+        private val KEY_LAST_CONNECT_DEVICE_ID = stringPreferencesKey("last_connect_device_id")
+        private val KEY_LAST_CONNECT_DEVICE_NAME = stringPreferencesKey("last_connect_device_name")
+        private val KEY_LAST_CONNECT_DEVICE_TYPE = stringPreferencesKey("last_connect_device_type")
+        private val KEY_LAST_CONNECT_SEEN_AT = longPreferencesKey("last_connect_seen_at_epoch_ms")
         private val KEY_BT_MAC = stringPreferencesKey("bt_auto_launch_mac")
+        private val KEY_COMPANION_WAKE_URL = stringPreferencesKey("companion_wake_webhook_url")
+        const val PLAYBACK_TARGET_AUTO = "auto"
+        const val PLAYBACK_TARGET_PHONE = "phone"
+        const val PLAYBACK_TARGET_CAR = "car"
+        const val PLAYBACK_TARGET_SPECIFIC = "specific"
         private val KEY_GRID_COLUMNS = androidx.datastore.preferences.core.intPreferencesKey("grid_columns")
         private val KEY_RIGHT_PADDING = androidx.datastore.preferences.core.intPreferencesKey("right_padding")
         private val KEY_PLAY_INSTANTLY = androidx.datastore.preferences.core.booleanPreferencesKey("play_instantly")
@@ -89,6 +101,9 @@ class TokenManager(
 
     val lockedDeviceIdFlow: Flow<String?> = dataStore.data.map { it[KEY_LOCKED_DEVICE_ID] }
     val lockedDeviceNameFlow: Flow<String?> = dataStore.data.map { it[KEY_LOCKED_DEVICE_NAME] }
+    val playbackTargetModeFlow: Flow<String> = dataStore.data.map {
+        it[KEY_PLAYBACK_TARGET_MODE] ?: PLAYBACK_TARGET_AUTO
+    }
 
     val gridColumnsFlow: kotlinx.coroutines.flow.Flow<Int> = dataStore.data.map { it[KEY_GRID_COLUMNS] ?: 4 }
     val rightPaddingFlow: kotlinx.coroutines.flow.Flow<Int> = dataStore.data.map { it[KEY_RIGHT_PADDING] ?: 160 }
@@ -289,6 +304,7 @@ class TokenManager(
         dataStore.edit { prefs ->
             prefs[KEY_LOCKED_DEVICE_ID] = deviceId
             prefs[KEY_LOCKED_DEVICE_NAME] = deviceName
+            prefs[KEY_PLAYBACK_TARGET_MODE] = PLAYBACK_TARGET_SPECIFIC
         }
     }
 
@@ -299,11 +315,60 @@ class TokenManager(
         dataStore.edit { prefs ->
             prefs.remove(KEY_LOCKED_DEVICE_ID)
             prefs.remove(KEY_LOCKED_DEVICE_NAME)
+            prefs[KEY_PLAYBACK_TARGET_MODE] = PLAYBACK_TARGET_AUTO
         }
     }
 
+    suspend fun savePlaybackTargetMode(mode: String) {
+        dataStore.edit { prefs ->
+            prefs[KEY_PLAYBACK_TARGET_MODE] = mode
+            if (mode != PLAYBACK_TARGET_SPECIFIC) {
+                prefs.remove(KEY_LOCKED_DEVICE_ID)
+                prefs.remove(KEY_LOCKED_DEVICE_NAME)
+            }
+        }
+    }
+
+    suspend fun getPlaybackTargetMode(): String = playbackTargetModeFlow.first()
+
     suspend fun getLockedDeviceId(): String? = lockedDeviceIdFlow.first()
     suspend fun getLockedDeviceName(): String? = lockedDeviceNameFlow.first()
+
+    // ── Last successful Connect device (survives process death) ───────
+
+    suspend fun getLastKnownConnectDevice(): LastKnownDevice? {
+        val prefs = dataStore.data.first()
+        val id = prefs[KEY_LAST_CONNECT_DEVICE_ID]?.trim().orEmpty()
+        if (id.isBlank()) return null
+        return LastKnownDevice(
+            deviceId = id,
+            deviceName = prefs[KEY_LAST_CONNECT_DEVICE_NAME]?.ifBlank { "Device" } ?: "Device",
+            deviceType = prefs[KEY_LAST_CONNECT_DEVICE_TYPE]?.ifBlank { "Unknown" } ?: "Unknown",
+            lastSeenAtEpochMs = prefs[KEY_LAST_CONNECT_SEEN_AT] ?: 0L
+        )
+    }
+
+    suspend fun saveLastKnownConnectDevice(device: LastKnownDevice) {
+        dataStore.edit { prefs ->
+            prefs[KEY_LAST_CONNECT_DEVICE_ID] = device.deviceId
+            prefs[KEY_LAST_CONNECT_DEVICE_NAME] = device.deviceName
+            prefs[KEY_LAST_CONNECT_DEVICE_TYPE] = device.deviceType
+            prefs[KEY_LAST_CONNECT_SEEN_AT] = device.lastSeenAtEpochMs
+        }
+        AppLogger.i(TAG, "Persisted last Connect device: ${device.deviceName} (${device.deviceId})")
+    }
+
+    suspend fun clearLastKnownConnectDevice() {
+        dataStore.edit { prefs ->
+            prefs.remove(KEY_LAST_CONNECT_DEVICE_ID)
+            prefs.remove(KEY_LAST_CONNECT_DEVICE_NAME)
+            prefs.remove(KEY_LAST_CONNECT_DEVICE_TYPE)
+            prefs.remove(KEY_LAST_CONNECT_SEEN_AT)
+        }
+    }
+
+    /** [LastKnownDeviceStore] backed by this manager's DataStore. */
+    fun asLastKnownDeviceStore(): LastKnownDeviceStore = TokenManagerLastKnownDeviceStore(this)
 
     // ── Bluetooth Auto-Launch MAC ─────────────────────────────────────
 
@@ -357,6 +422,25 @@ class TokenManager(
 
     suspend fun getBtAutoLaunchMac(): String? = btAutoLaunchMacFlow.first()
 
+    val companionWakeUrlFlow: Flow<String?> = dataStore.data.map { it[KEY_COMPANION_WAKE_URL] }
+
+    suspend fun getCompanionWakeUrl(): String? =
+        companionWakeUrlFlow.first()?.trim()?.takeIf { it.isNotBlank() }
+
+    /**
+     * Home Assistant webhook URL used by [com.cloudbridge.spotify.player.HttpCompanionWake].
+     * Example: `http://192.168.1.110:8123/api/webhook/cloud_bridge_wake_spotify`
+     * Pass null/blank to disable.
+     */
+    suspend fun saveCompanionWakeUrl(url: String?) {
+        dataStore.edit { prefs ->
+            val normalized = url?.trim().orEmpty()
+            if (normalized.isBlank()) prefs.remove(KEY_COMPANION_WAKE_URL)
+            else prefs[KEY_COMPANION_WAKE_URL] = normalized
+        }
+        AppLogger.i(TAG, "Companion wake URL ${if (url.isNullOrBlank()) "cleared" else "saved"}")
+    }
+
     suspend fun saveLoggingEnabled(enabled: Boolean) {
         dataStore.edit { it[KEY_LOGGING_ENABLED] = enabled }
     }
@@ -372,5 +456,30 @@ class TokenManager(
             setActiveProfileId(fallbackProfile.id)
         }
         return fallbackProfile
+    }
+}
+
+private class TokenManagerLastKnownDeviceStore(
+    private val tokenManager: TokenManager
+) : LastKnownDeviceStore {
+    @Volatile
+    private var memory: LastKnownDevice? = null
+
+    override fun peek(): LastKnownDevice? = memory
+
+    override suspend fun load(): LastKnownDevice? {
+        val loaded = tokenManager.getLastKnownConnectDevice()
+        memory = loaded
+        return loaded
+    }
+
+    override suspend fun save(device: LastKnownDevice) {
+        memory = device
+        tokenManager.saveLastKnownConnectDevice(device)
+    }
+
+    override suspend fun clear() {
+        memory = null
+        tokenManager.clearLastKnownConnectDevice()
     }
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto-backup for OAuth profiles and app preferences so a reinstall/restore
+  does not force a full re-login when the OS restores app data.
+-->
+<full-backup-content>
+    <!-- Room profile DB (refresh tokens, client id, etc.) -->
+    <include domain="database" path="cloudbridge_cache.db" />
+    <include domain="database" path="cloudbridge_cache.db-shm" />
+    <include domain="database" path="cloudbridge_cache.db-wal" />
+    <!-- DataStore prefs (active profile id, layout, playback target) -->
+    <include domain="file" path="datastore/" />
+    <include domain="sharedpref" path="." />
+</full-backup-content>

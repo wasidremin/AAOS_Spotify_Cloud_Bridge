@@ -13,18 +13,53 @@ android {
         applicationId = "com.cloudbridge.spotify"
         minSdk = 30
         targetSdk = 35
-        versionCode = 19
-        versionName = "2.8.4"
+        versionCode = 20
+        versionName = "2.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("../release.keystore")
-            storePassword = "password123"
-            keyAlias = "release"
-            keyPassword = "password123"
+        /**
+         * Single local signing identity for debug + release so `adb install -r`
+         * never hits INSTALL_FAILED_UPDATE_INCOMPATIBLE and never needs an
+         * uninstall (which would wipe OAuth tokens / profiles).
+         *
+         * Preference order:
+         * 1. repo `release.keystore` (if present)
+         * 2. `signing/cloudbridge-local.keystore` (generated once on this machine)
+         * 3. SDK default `~/.android/debug.keystore` (stable Android Debug identity)
+         */
+        create("local") {
+            val releaseKey = rootProject.file("release.keystore")
+            val projectLocalKey = rootProject.file("signing/cloudbridge-local.keystore")
+            val sdkDebugKey = file(
+                "${System.getProperty("user.home")}/.android/debug.keystore"
+            )
+            when {
+                releaseKey.isFile -> {
+                    storeFile = releaseKey
+                    storePassword = "password123"
+                    keyAlias = "release"
+                    keyPassword = "password123"
+                }
+                projectLocalKey.isFile -> {
+                    storeFile = projectLocalKey
+                    storePassword = "cloudbridge"
+                    keyAlias = "cloudbridge"
+                    keyPassword = "cloudbridge"
+                }
+                sdkDebugKey.isFile -> {
+                    storeFile = sdkDebugKey
+                    storePassword = "android"
+                    keyAlias = "androiddebugkey"
+                    keyPassword = "android"
+                }
+                else -> error(
+                    "No signing keystore found. Create signing/cloudbridge-local.keystore " +
+                        "or install the Android SDK debug keystore."
+                )
+            }
         }
     }
 
@@ -35,10 +70,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("release")
+            // Same cert as debug so upgrades never force data wipe.
+            signingConfig = signingConfigs.getByName("local")
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("local")
         }
     }
 

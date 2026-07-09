@@ -1,177 +1,61 @@
 package com.cloudbridge.spotify.player
 
-import com.cloudbridge.spotify.network.SpotifyApiService
 import com.cloudbridge.spotify.util.AppLogger
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 /**
- * Discovers and caches the user's phone Spotify device ID.
+ * Low-level cache of the last known Spotify Connect device.
  *
- * Why this exists:
- * Every playback command to the Spotify Web API MUST include a `device_id`
- * parameter targeting the user's smartphone. Without this, Spotify might
- * route playback to any connected device (another phone, a smart speaker,
- * or the car's built-in Spotify if installed).
- *
- * Device selection priority:
- * 1. Active smartphone (type == "Smartphone" && isActive)
- * 2. Any smartphone (type == "Smartphone")
- * 3. Any active device (fallback)
- * 4. null (no devices available)
- *
- * Cache TTL: 2 minutes. Devices can come and go as the phone
- * connects/disconnects from Spotify.
+ * **Does not select or discover devices.** [PlaybackSessionManager] owns
+ * discovery, [PlaybackTarget] resolution, and reconnect. This class only
+ * remembers the last good id/name so blind spots and UI labels stay warm.
  */
-class DeviceManager(private val api: SpotifyApiService) {
+class DeviceManager {
 
     companion object {
         private const val TAG = "DeviceManager"
-        private const val CACHE_TTL_MS = 2 * 60 * 1000L  // 2 minutes
+        private const val CACHE_TTL_MS = 2 * 60 * 1000L
     }
 
     /**
-     * When set, [getPhoneDeviceId] always returns this value
-     * instead of auto-discovering a smartphone.
-     * Set by the ViewModel from DataStore preferences.
+     * When set by [PlaybackSessionManager] for [PlaybackTarget.Specific],
+     * callers may read it for diagnostics. Session manager re-resolves the
+     * live id on reconnect; this is not used for command routing.
      */
+    @Volatile
     var lockedDeviceId: String? = null
 
     private var cachedDeviceId: String? = null
     private var cachedDeviceName: String? = null
     private var cacheTimestamp: Long = 0L
-    private val mutex = Mutex()
+    private val cacheLock = Any()
 
-    /**
-     * Get the phone's Spotify device ID.
-     *
-     * Returns the cached value if still within the [CACHE_TTL_MS] window.
-     * Otherwise, fetches a fresh device list from the API.
-     *
-     * The [mutex] ensures that only one coroutine hits the network at a time;
-     * others will either reuse the cache or wait.
-     *
-     * @return The device ID string, or `null` if no suitable device is found.
-     */
-    suspend fun getPhoneDeviceId(): String? = withContext(Dispatchers.IO) {
-        // If user locked a specific device, always use it
-        lockedDeviceId?.let {
-            AppLogger.d(TAG, "Using locked device: $it")
-            return@withContext it
-        }
+    fun getCachedDeviceId(): String? = synchronized(cacheLock) { cachedDeviceId }
 
-        mutex.withLock {
-            if (cachedDeviceId != null && !isCacheExpired()) {
-                AppLogger.d(TAG, "Returning cached device: $cachedDeviceName ($cachedDeviceId)")
-                return@withContext cachedDeviceId
-            }
-        }
+    fun getCachedDeviceName(): String? = synchronized(cacheLock) { cachedDeviceName }
 
-        return@withContext refreshDeviceId()
+    fun isCacheFresh(): Boolean = synchronized(cacheLock) {
+        cachedDeviceId != null && System.currentTimeMillis() - cacheTimestamp <= CACHE_TTL_MS
     }
 
     /**
-     * Force-refresh the device list from the Spotify API.
-     *
-     * Ignores the cache entirely. Called by [SpotifyPlaybackController]
-     * when a playback command returns 404 (device not found),
-     * indicating the previously cached device went offline.
-     *
-     * Device selection priority:
-     * 1. Active smartphone (`type == "Smartphone" && isActive`)
-     * 2. Any smartphone (`type == "Smartphone"`)
-     * 3. Any active, unrestricted device (fallback)
-     * 4. `null` — no devices available
-     *
-     * @return The newly discovered device ID, or `null`.
-     */
-    suspend fun refreshDeviceId(): String? = withContext(Dispatchers.IO) {
-        // If the user locked a specific device, completely bypass auto-discovery
-        lockedDeviceId?.let {
-            AppLogger.d(TAG, "Refresh bypassed: Using locked device ($it)")
-            return@withContext it
-        }
-
-        try {
-            val response = api.getDevices()
-            val devices = response.devices
-
-            AppLogger.d(TAG, "Found ${devices.size} devices: ${devices.map { "${it.name} (${it.type}, active=${it.isActive})" }}")
-
-            // Priority 1: Active smartphone
-            val activePhone = devices.find {
-                it.type.equals("Smartphone", ignoreCase = true) && it.isActive && !it.id.isNullOrBlank()
-            }
-            if (activePhone != null) {
-                cacheDevice(activePhone.id!!, activePhone.name)
-                return@withContext activePhone.id
-            }
-
-            // Priority 2: Any smartphone
-            val anyPhone = devices.find {
-                it.type.equals("Smartphone", ignoreCase = true) && !it.id.isNullOrBlank()
-            }
-            if (anyPhone != null) {
-                cacheDevice(anyPhone.id!!, anyPhone.name)
-                return@withContext anyPhone.id
-            }
-
-            val anyActiveDevice = devices.find {
-                it.isActive && !it.isRestricted && !it.id.isNullOrBlank()
-            }
-            if (anyActiveDevice != null) {
-                cacheDevice(anyActiveDevice.id!!, anyActiveDevice.name)
-                return@withContext anyActiveDevice.id
-            }
-
-            fallbackToRememberedDevice("No suitable Spotify device found.")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to fetch devices: ${e.message}", e)
-            fallbackToRememberedDevice("Device discovery failed; preserving remembered target until Spotify reports devices again.")
-        }
-    }
-
-    fun getCachedDeviceId(): String? = cachedDeviceId
-
-    /**
-     * Passively remembers a known active playback device observed elsewhere.
+     * Passively remembers a known active playback device observed elsewhere
+     * (metadata poll, successful command, reconnect).
      */
     fun registerActiveDevice(id: String, name: String) {
         if (id.isBlank()) return
-        cacheDevice(id, name.ifBlank { "Active device" })
-    }
-
-    private fun fallbackToRememberedDevice(reason: String): String? {
-        val rememberedId = cachedDeviceId
-        if (!rememberedId.isNullOrBlank()) {
-            AppLogger.w(TAG, "$reason Falling back to remembered device: $cachedDeviceName ($rememberedId)")
-            return rememberedId
-        }
-
-        clearCache()
-        return null
-    }
-
-    private fun cacheDevice(id: String, name: String) {
-        mutex.tryLock() // Best-effort lock for setting cache
-        try {
+        synchronized(cacheLock) {
             cachedDeviceId = id
-            cachedDeviceName = name
+            cachedDeviceName = name.ifBlank { "Active device" }
             cacheTimestamp = System.currentTimeMillis()
-            AppLogger.i(TAG, "Cached device: $name ($id)")
-        } finally {
-            try { mutex.unlock() } catch (_: IllegalStateException) { }
+        }
+        AppLogger.i(TAG, "Cached device: $name ($id)")
+    }
+
+    fun clearCache() {
+        synchronized(cacheLock) {
+            cachedDeviceId = null
+            cachedDeviceName = null
+            cacheTimestamp = 0L
         }
     }
-
-    private fun clearCache() {
-        cachedDeviceId = null
-        cachedDeviceName = null
-        cacheTimestamp = 0L
-    }
-
-    private fun isCacheExpired(): Boolean =
-        System.currentTimeMillis() - cacheTimestamp > CACHE_TTL_MS
 }

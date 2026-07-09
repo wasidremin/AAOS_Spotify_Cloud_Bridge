@@ -31,13 +31,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.cloudbridge.spotify.auth.SetupActivity
 import com.cloudbridge.spotify.network.model.SpotifyDevice
+import com.cloudbridge.spotify.player.PlaybackTarget
 import com.cloudbridge.spotify.ui.SpotifyViewModel
 import com.cloudbridge.spotify.ui.theme.*
 
 /**
  * Settings screen providing:
- * - **Device lock**: select a Spotify Connect device to lock playback to,
- *   or leave on "Automatic" (default behaviour).
+ * - **Playback target**: Auto / Phone / Car player, or lock to a specific device.
  * - **Re-authenticate**: launches [SetupActivity] to refresh credentials.
  *
  * Device list is loaded via [SpotifyViewModel.loadDevices] when the screen
@@ -52,6 +52,7 @@ fun SettingsScreen(
     val devices by viewModel.deviceList.collectAsState()
     val lockedId by viewModel.lockedDeviceId.collectAsState()
     val lockedName by viewModel.lockedDeviceName.collectAsState()
+    val playbackTarget by viewModel.playbackTarget.collectAsState()
     val btAutoLaunchMac by viewModel.btAutoLaunchMac.collectAsState()
     val gridColumns by viewModel.gridColumns.collectAsState()
     val rightPadding by viewModel.rightPadding.collectAsState()
@@ -160,36 +161,57 @@ fun SettingsScreen(
             }
 
             item {
+                val summary = when (val target = playbackTarget) {
+                    is PlaybackTarget.Auto -> "Auto — phone first, then any active device"
+                    is PlaybackTarget.Phone -> "Prefer phone Spotify"
+                    is PlaybackTarget.CarPlayer -> "Prefer car / non-phone player"
+                    is PlaybackTarget.Specific -> "Locked to: ${target.deviceName}"
+                }
                 Text(
-                    text = if (lockedId != null)
-                        "Locked to: $lockedName"
-                    else
-                        "Automatic (discovers device each time)",
+                    text = summary,
                     style = MaterialTheme.typography.bodyMedium,
                     color = SpotifyLightGray,
                     modifier = Modifier.padding(bottom = 4.dp)
                 )
             }
 
-            // "Automatic" option
             item {
                 DeviceRow(
                     name = "Automatic",
-                    type = "Let the app discover the best device",
-                    isSelected = lockedId == null,
-                    onClick = { viewModel.unlockDevice() }
+                    type = "Phone first, then any active unrestricted device",
+                    isSelected = playbackTarget is PlaybackTarget.Auto && lockedId == null,
+                    onClick = { viewModel.setPlaybackTargetPreference(PlaybackTarget.Auto) }
+                )
+            }
+            item {
+                DeviceRow(
+                    name = "Phone",
+                    type = "Always target a smartphone Connect device",
+                    isSelected = playbackTarget is PlaybackTarget.Phone,
+                    onClick = { viewModel.setPlaybackTargetPreference(PlaybackTarget.Phone) }
+                )
+            }
+            item {
+                DeviceRow(
+                    name = "Car player",
+                    type = "Prefer the car's built-in Spotify / non-phone device",
+                    isSelected = playbackTarget is PlaybackTarget.CarPlayer,
+                    onClick = { viewModel.setPlaybackTargetPreference(PlaybackTarget.CarPlayer) }
                 )
             }
 
-            // Real devices
+            // Specific devices (legacy lock / pin)
             items(devices, key = { it.id ?: it.name }) { device ->
                 DeviceRow(
                     name = device.name,
                     type = buildString {
                         append(device.type)
                         if (device.isActive) append(" • Active")
+                        if (device.isRestricted) append(" • Restricted")
                     },
-                    isSelected = lockedId == device.id,
+                    isSelected = lockedId == device.id ||
+                        (playbackTarget is PlaybackTarget.Specific &&
+                            (playbackTarget as PlaybackTarget.Specific).deviceId == device.id),
                     onClick = {
                         device.id?.let { id -> viewModel.lockDevice(id, device.name) }
                     }
@@ -247,6 +269,59 @@ fun SettingsScreen(
                             text = if (btAutoLaunchMac.isNullOrBlank()) "Manual" else "Disable",
                             color = if (btAutoLaunchMac.isNullOrBlank()) SpotifyLightGray else SpotifyGreen
                         )
+                    }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(16.dp))
+                SectionHeader("Advanced: optional phone wake")
+            }
+
+            item {
+                val savedUrl by viewModel.companionWakeUrl.collectAsState()
+                var draftUrl by remember(savedUrl) { mutableStateOf(savedUrl.orEmpty()) }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(SpotifyDarkGray)
+                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                ) {
+                    Text(
+                        "Most users leave this empty. Cloud-Bridge wakes the phone via Spotify Connect " +
+                            "and Bluetooth AVRCP when the phone is paired to the car.\n\n" +
+                            "Optional: POST URL for home automation (e.g. Home Assistant webhook) that " +
+                            "opens Spotify on the phone. Not required and not used by default.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = SpotifyLightGray
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = draftUrl,
+                        onValueChange = { draftUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Wake webhook URL (optional)") },
+                        placeholder = {
+                            Text("http://homeassistant.local:8123/api/webhook/…")
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = {
+                            draftUrl = ""
+                            viewModel.saveCompanionWakeUrl(null)
+                        }) {
+                            Text("Clear", color = SpotifyLightGray)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        TextButton(onClick = { viewModel.saveCompanionWakeUrl(draftUrl) }) {
+                            Text("Save", color = SpotifyGreen)
+                        }
                     }
                 }
             }
